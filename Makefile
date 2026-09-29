@@ -3,13 +3,13 @@ BINARY := blocky-dashboard
 .PHONY: build test run clean
 
 build:
-	go build -trimpath -ldflags="-s -w" -o $(BINARY) ./cmd/blocky-dashboard
+	go build -trimpath -o $(BINARY) main.go
 
 test:
 	go test ./...
 
 run:
-	go run ./cmd/blocky-dashboard --config config.example.json
+	go run blocky-dashboard --config config.example.json
 
 clean:
 	rm -f $(BINARY)
