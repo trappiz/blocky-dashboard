@@ -1,0 +1,23 @@
+[Unit]
+Description=Blocky Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=blocky-dashboard
+Group=blocky-dashboard
+ExecStart=/usr/local/bin/blocky-dashboard --config /etc/blocky-dashboard/config.json
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/blocky-dashboard
+
+[Install]
+WantedBy=multi-user.target

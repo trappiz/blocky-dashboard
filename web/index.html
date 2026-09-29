@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#09090b">
+<title>Blocky Dashboard</title><link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+  <div class="brand"><div class="brandmark">B</div><div><b>Blocky</b><span>Dashboard</span></div></div>
+  <nav>
+    <button class="nav active" data-view="overview"><span>◈</span> Overview</button>
+    <button class="nav" data-view="query"><span>⌕</span> Query tool</button>
+    <button class="nav" data-view="logs"><span>≡</span> Query logs</button>
+    <button class="nav" data-view="controls"><span>⚙</span> Controls</button>
+  </nav>
+  <div class="side-bottom"><div id="instance" class="muted">—</div><div class="tiny">single-binary edition</div></div>
+</aside>
+
+<main>
+<header class="topbar">
+  <div><div class="eyebrow">DNS CONTROL PLANE</div><h1 id="pageTitle">Overview</h1></div>
+  <div class="top-actions"><span id="connection" class="pill">Connecting…</span><button class="icon" onclick="load()">↻</button></div>
+</header>
+
+<section id="overview" class="view active">
+  <div class="cards">
+    <article class="metric"><span>Total queries</span><strong id="queries">—</strong><small>rolling 24h</small></article>
+    <article class="metric"><span>Blocked</span><strong id="blocked">—</strong><small id="blockedPct">—</small></article>
+    <article class="metric"><span>Cache hit rate</span><strong id="cacheRate">—</strong><small id="cacheEntries">— entries</small></article>
+    <article class="metric"><span>Avg response</span><strong id="latency">—</strong><small>milliseconds</small></article>
+  </div>
+
+  <div class="grid2">
+    <article class="panel chart-panel">
+      <div class="panel-head"><div><h2>Queries over time</h2><p id="window" class="muted">Rolling 24h</p></div></div>
+      <div id="chart" class="chart"></div>
+    </article>
+    <article class="panel">
+      <div class="panel-head"><div><h2>Outcomes</h2><p class="muted">How Blocky handled requests</p></div></div>
+      <div id="outcomes" class="bars"></div>
+    </article>
+  </div>
+
+  <div class="grid3">
+    <ListPanel title="Top domains" id="topDomains"/>
+    <ListPanel title="Blocked domains" id="blockedDomains"/>
+    <ListPanel title="Top clients" id="topClients"/>
+  </div>
+
+  <div class="grid2">
+    <article class="panel">
+      <div class="panel-head"><div><h2>Lists</h2><p class="muted">Current list entry counts</p></div></div>
+      <div id="lists" class="mini-grid"></div>
+    </article>
+    <article class="panel">
+      <div class="panel-head"><div><h2>DNS query types</h2><p class="muted">Rolling 24h</p></div></div>
+      <div id="types" class="bars"></div>
+    </article>
+  </div>
+</section>
+
+<section id="query" class="view">
+ <article class="panel hero-panel">
+  <div class="panel-head"><div><h2>Query tool</h2><p class="muted">Run a DNS request through Blocky and inspect its decision.</p></div></div>
+  <form id="queryForm"><div class="query-row"><input id="domain" placeholder="example.com" autocomplete="off" required><select id="type"><option>A</option><option>AAAA</option><option>MX</option><option>TXT</option><option>CNAME</option><option>NS</option><option>PTR</option></select><button>Query</button></div></form>
+  <div id="queryResult" class="query-result empty">Enter a domain to test it.</div>
+ </article>
+</section>
+
+<section id="logs" class="view">
+ <article class="panel">
+  <div class="panel-head"><div><h2>Query logs</h2><p class="muted">Search Blocky's optional CSV query-log output.</p></div><span id="logStatus" class="pill">Not configured</span></div>
+  <div class="filters"><input id="logSearch" placeholder="Search domain or client…"><input id="logClient" placeholder="Client (optional)"><select id="logType"><option value="">All outcomes</option></select><button onclick="loadLogs()">Search</button></div>
+  <div id="logsTable" class="table-wrap"><div class="empty-state">Query logging is optional. Configure <code>queryLog</code> to enable this view.</div></div>
+ </article>
+</section>
+
+<section id="controls" class="view">
+ <div class="grid2">
+  <article class="panel">
+   <div class="panel-head"><div><h2>Blocking status</h2><p class="muted">This controls query blocking, not the DNS server itself.</p></div><span id="blockingStatus" class="status">—</span></div>
+   <div id="timer" class="muted"></div>
+   <div class="actions"><button onclick="enableBlocking()">Enable blocking</button><button class="secondary" onclick="disableBlocking('10m')">Disable 10 min</button><button class="secondary" onclick="disableBlocking('1h')">Disable 1 hour</button></div>
+  </article>
+  <article class="panel">
+   <div class="panel-head"><div><h2>Maintenance</h2><p class="muted">Operations exposed by Blocky's REST API.</p></div></div>
+   <div class="actions"><button onclick="doAction('/api/lists/refresh')">Refresh lists</button><button onclick="doAction('/api/cache/flush')">Clear cache</button></div>
+  </article>
+ </div>
+</section>
+
+<footer><span>Blocky Dashboard</span><span id="updated">—</span></footer>
+</main></div>
+<script src="/app.js"></script>
+</body>
+</html>
+

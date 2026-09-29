@@ -1,0 +1,29 @@
+{
+  "listen": "127.0.0.1:3001",
+  "blocky": {
+    "url": "http://127.0.0.1:4000",
+    "token": "",
+    "headers": {}
+  },
+  "ui": {
+    "title": "Blocky Dashboard",
+    "instance": "home-dns",
+    "basePath": "/",
+    "autoRefreshSeconds": 30
+  },
+  "auth": {
+    "enabled": false,
+    "username": "admin",
+    "password": "change-me",
+    "headerToken": ""
+  },
+  "queryLog": {
+    "type": "",
+    "target": "/var/lib/blocky/logs",
+    "days": 1
+  },
+  "queryStore": {
+    "enabled": false,
+    "path": "/var/lib/blocky-dashboard/history.jsonl"
+  }
+}
