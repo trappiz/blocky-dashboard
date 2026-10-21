@@ -5,22 +5,47 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 
 	"github.com/trappiz/blocky-dashboard/internal/config"
 )
 
+// upstream is a fake Blocky. Handlers run concurrently (the overview fetches
+// status and stats in parallel), so all access goes through the mutex.
 type upstream struct {
+	mu    sync.Mutex
 	calls []string
 	fail  bool
+}
+
+func (u *upstream) Calls() []string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return append([]string(nil), u.calls...)
+}
+
+func (u *upstream) Reset() {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.calls = nil
+}
+
+func (u *upstream) SetFail(fail bool) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.fail = fail
 }
 
 func newUpstream(t *testing.T, u *upstream) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u.mu.Lock()
 		u.calls = append(u.calls, r.Method+" "+r.URL.RequestURI())
-		if u.fail {
+		fail := u.fail
+		u.mu.Unlock()
+		if fail {
 			http.Error(w, "down", http.StatusInternalServerError)
 			return
 		}
@@ -36,11 +61,11 @@ var testWeb = fstest.MapFS{
 	"app.js":     {Data: []byte("// app")},
 }
 
-func newTestServer(t *testing.T, basePath string) (*Server, *[]string) {
+func newTestServer(t *testing.T, basePath string) (*Server, *upstream) {
 	t.Helper()
 	u := &upstream{}
 	cfg := config.Config{Blocky: config.BlockyConfig{URL: newUpstream(t, u)}, UI: config.UIConfig{BasePath: basePath}}
-	return newServer(cfg, testWeb), &u.calls
+	return newServer(cfg, testWeb), u
 }
 
 func newMultiServer(t *testing.T, ups ...*upstream) *Server {
@@ -66,7 +91,7 @@ func do(h http.Handler, method, target string, headers map[string]string) *httpt
 }
 
 func TestDisableRequiresPostAndForwardsOnlyKnownParams(t *testing.T) {
-	s, calls := newTestServer(t, "/")
+	s, up := newTestServer(t, "/")
 	h := s.Handler()
 
 	if rec := do(h, http.MethodGet, "/api/blocking/disable?duration=5m", nil); rec.Code != http.StatusMethodNotAllowed {
@@ -75,13 +100,13 @@ func TestDisableRequiresPostAndForwardsOnlyKnownParams(t *testing.T) {
 	if rec := do(h, http.MethodPost, "/api/blocking/disable?duration=5m&evil=1", nil); rec.Code != http.StatusOK {
 		t.Fatalf("POST failed: %d %s", rec.Code, rec.Body)
 	}
-	if len(*calls) != 1 || (*calls)[0] != "GET /api/blocking/disable?duration=5m" {
-		t.Fatalf("unexpected upstream calls: %v", *calls)
+	if calls := up.Calls(); len(calls) != 1 || calls[0] != "GET /api/blocking/disable?duration=5m" {
+		t.Fatalf("unexpected upstream calls: %v", calls)
 	}
 }
 
 func TestCrossSiteRequestsRejected(t *testing.T) {
-	s, calls := newTestServer(t, "/")
+	s, up := newTestServer(t, "/")
 	h := s.Handler()
 
 	if rec := do(h, http.MethodPost, "/api/cache/flush", map[string]string{"Origin": "https://evil.example"}); rec.Code != http.StatusForbidden {
@@ -93,8 +118,8 @@ func TestCrossSiteRequestsRejected(t *testing.T) {
 	if rec := do(h, http.MethodPost, "/api/cache/flush", map[string]string{"Origin": "http://example.com", "Sec-Fetch-Site": "same-origin"}); rec.Code != http.StatusOK {
 		t.Fatalf("same-origin POST should pass, got %d", rec.Code)
 	}
-	if len(*calls) != 1 {
-		t.Fatalf("want exactly one upstream call, got %v", *calls)
+	if calls := up.Calls(); len(calls) != 1 {
+		t.Fatalf("want exactly one upstream call, got %v", calls)
 	}
 }
 
@@ -130,13 +155,13 @@ func TestActionsFanOutToAllInstances(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("disable all failed: %d %s", rec.Code, rec.Body)
 	}
-	if len(a.calls) != 1 || len(b.calls) != 1 {
-		t.Fatalf("want one call per instance, got %v / %v", a.calls, b.calls)
+	if len(a.Calls()) != 1 || len(b.Calls()) != 1 {
+		t.Fatalf("want one call per instance, got %v / %v", a.Calls(), b.Calls())
 	}
 
 	rec = do(h, http.MethodPost, "/api/blocking/enable?instance=dns-two", nil)
-	if rec.Code != http.StatusOK || len(a.calls) != 1 || len(b.calls) != 2 {
-		t.Fatalf("single-instance action hit wrong upstream: %d %v / %v", rec.Code, a.calls, b.calls)
+	if rec.Code != http.StatusOK || len(a.Calls()) != 1 || len(b.Calls()) != 2 {
+		t.Fatalf("single-instance action hit wrong upstream: %d %v / %v", rec.Code, a.Calls(), b.Calls())
 	}
 
 	if rec := do(h, http.MethodPost, "/api/cache/flush?instance=nope", nil); rec.Code != http.StatusBadRequest {
@@ -158,7 +183,7 @@ func TestActionReportsPartialFailure(t *testing.T) {
 		t.Fatalf("want partial success, got %d %s", rec.Code, rec.Body)
 	}
 
-	a.fail = true
+	a.SetFail(true)
 	if rec := do(h, http.MethodPost, "/api/cache/flush", nil); rec.Code != http.StatusBadGateway {
 		t.Fatalf("all failed should be 502, got %d", rec.Code)
 	}
@@ -180,10 +205,11 @@ func TestOverviewAndPerInstanceRouting(t *testing.T) {
 		t.Fatalf("unexpected overview: %s", rec.Body)
 	}
 
-	a.calls, b.calls = nil, nil
+	a.Reset()
+	b.Reset()
 	do(h, http.MethodGet, "/api/stats?instance=dns-two", nil)
-	if len(a.calls) != 0 || len(b.calls) != 1 {
-		t.Fatalf("stats routed wrong: %v / %v", a.calls, b.calls)
+	if len(a.Calls()) != 0 || len(b.Calls()) != 1 {
+		t.Fatalf("stats routed wrong: %v / %v", a.Calls(), b.Calls())
 	}
 	if rec := do(h, http.MethodGet, "/api/stats?instance=nope", nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("unknown instance should be 400, got %d", rec.Code)
