@@ -133,6 +133,54 @@ To serve the dashboard under a sub-path (for example `https://example.com/dns/`)
 
 Keep Blocky's API listener private if possible and expose only the dashboard through your proxy.
 
+## Docker
+
+The image is a two-stage build: Go compiles a static binary, which is copied into
+[distroless `static-debian12:nonroot`](https://github.com/GoogleContainerTools/distroless)
+(no shell or package manager, runs as uid 65532). It is published for `linux/amd64` and `linux/arm64`.
+
+```bash
+make docker                       # builds blocky-dashboard:dev locally
+
+# one Blocky, no config file
+docker run -p 3001:3001 -e BLOCKY_DASHBOARD_BLOCKY_URL=http://10.0.0.53:4000 blocky-dashboard:dev
+
+# with a config file (instances, auth, query logs, ...)
+docker run -p 3001:3001 \
+  -v ./config.json:/etc/blocky-dashboard/config.json:ro \
+  -e BLOCKY_DASHBOARD_CONFIG=/etc/blocky-dashboard/config.json \
+  blocky-dashboard:dev
+```
+
+The container listens on `:3001`. Settings can come from flags or environment variables:
+
+| Flag | Environment variable |
+| --- | --- |
+| `--config` | `BLOCKY_DASHBOARD_CONFIG` |
+| `--listen` | `BLOCKY_DASHBOARD_LISTEN` (image default `:3001`) |
+| `--blocky` | `BLOCKY_DASHBOARD_BLOCKY_URL` |
+
+`/healthz` answers without authentication and outside `ui.basePath`, so it works for
+container and Kubernetes probes. The image's `HEALTHCHECK` runs `blocky-dashboard -healthcheck`.
+Mount query-log directories read-only if you use them; the dashboard never writes to disk,
+so it runs fine with a read-only root filesystem.
+
+### Publishing with GitHub Actions
+
+`.github/workflows/docker.yml` tests the code, then builds the image on every push and pull request.
+It pushes to Docker Hub for pushes to `main` (tags `edge` and `sha-<commit>`) and for version
+tags: `v1.2.3` produces `1.2.3`, `1.2`, `1` and `latest`. Pull requests only build.
+
+Nothing is hard-coded. Set these once under **Settings → Secrets and variables → Actions**:
+
+| Name | Kind | Value |
+| --- | --- | --- |
+| `DOCKERHUB_USERNAME` | variable | Docker Hub account or organisation |
+| `DOCKERHUB_TOKEN` | secret | Docker Hub [access token](https://app.docker.com/settings/personal-access-tokens) with Read & Write scope |
+| `IMAGE_NAME` | variable, optional | full image name; defaults to `<DOCKERHUB_USERNAME>/<repository name>` |
+
+Dependabot (`.github/dependabot.yml`) opens weekly PRs to keep the base images and actions current.
+
 ## systemd
 
 Create the service user, install the binary/config, then:

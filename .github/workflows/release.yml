@@ -27,7 +27,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-        run: go build -trimpath -ldflags="-s -w" -o "blocky-dashboard-${GOOS}-${GOARCH}" ./cmd/blocky-dashboard
+        run: go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME#v}" -o "blocky-dashboard-${GOOS}-${GOARCH}" ./cmd/blocky-dashboard
       - uses: actions/upload-artifact@v4
         with:
           name: blocky-dashboard-${{ matrix.goarch }}

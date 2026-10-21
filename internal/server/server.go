@@ -46,7 +46,6 @@ func newServer(cfg config.Config, web fs.FS) *Server {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", s.healthz)
 	mux.HandleFunc("/api/config", s.configAPI)
 	mux.HandleFunc("/api/overview", s.overview)
 	mux.HandleFunc("/api/status", s.status)
@@ -70,7 +69,12 @@ func (s *Server) Handler() http.Handler {
 			inner.ServeHTTP(w, r)
 		})
 	}
-	return s.auth(logging(h))
+	// /healthz sits outside auth, logging and basePath so container and
+	// Kubernetes probes can reach it without credentials or log spam.
+	root := http.NewServeMux()
+	root.HandleFunc("/healthz", s.healthz)
+	root.Handle("/", s.auth(logging(h)))
+	return root
 }
 
 func (s *Server) auth(next http.Handler) http.Handler {

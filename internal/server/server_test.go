@@ -189,3 +189,16 @@ func TestOverviewAndPerInstanceRouting(t *testing.T) {
 		t.Fatalf("unknown instance should be 400, got %d", rec.Code)
 	}
 }
+
+func TestHealthzBypassesAuthAndBasePath(t *testing.T) {
+	s, _ := newTestServer(t, "/dns/")
+	s.cfg.Auth = config.AuthConfig{Enabled: true, Username: "admin", Password: "secret"}
+	h := s.Handler()
+
+	if rec := do(h, http.MethodGet, "/healthz", nil); rec.Code != http.StatusOK {
+		t.Fatalf("healthz should not need auth, got %d", rec.Code)
+	}
+	if rec := do(h, http.MethodGet, "/dns/api/config", nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("api should still need auth, got %d", rec.Code)
+	}
+}

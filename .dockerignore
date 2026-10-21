@@ -1,0 +1,8 @@
+.git
+.github
+.claude
+/blocky-dashboard
+/config.json
+*.md
+Dockerfile
+.dockerignore
