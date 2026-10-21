@@ -20,10 +20,6 @@
   "queryLog": {
     "type": "",
     "target": "/var/lib/blocky/logs",
-    "days": 1
-  },
-  "queryStore": {
-    "enabled": false,
-    "path": "/var/lib/blocky-dashboard/history.jsonl"
+    "days": 2
   }
 }

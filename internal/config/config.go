@@ -2,16 +2,17 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
+	"strings"
 )
 
 type Config struct {
-	Listen     string         `json:"listen"`
-	Blocky     BlockyConfig   `json:"blocky"`
-	UI         UIConfig       `json:"ui"`
-	Auth       AuthConfig     `json:"auth"`
-	QueryLog   QueryLogConfig `json:"queryLog"`
-	QueryStore QueryStore     `json:"queryStore"`
+	Listen   string         `json:"listen"`
+	Blocky   BlockyConfig   `json:"blocky"`
+	UI       UIConfig       `json:"ui"`
+	Auth     AuthConfig     `json:"auth"`
+	QueryLog QueryLogConfig `json:"queryLog"`
 }
 
 type BlockyConfig struct {
@@ -37,14 +38,9 @@ type AuthConfig struct {
 }
 
 type QueryLogConfig struct {
-	Type   string `json:"type"`   // csv for Blocky's CSV/csv-client logs
+	Type   string `json:"type"`   // csv for Blocky's csv/csv-client file logs
 	Target string `json:"target"` // log directory
-	Days   int    `json:"days"`   // 0 = today's file, >0 = include N days
-}
-
-type QueryStore struct {
-	Enabled bool   `json:"enabled"`
-	Path    string `json:"path"`
+	Days   int    `json:"days"`   // number of daily files to search, including today
 }
 
 func Load(path string) (Config, error) {
@@ -68,4 +64,20 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// Validate rejects configurations that would run with unsafe or unusable settings.
+func (c Config) Validate() error {
+	if c.Auth.Enabled && c.Auth.HeaderToken == "" {
+		if c.Auth.Username == "" || c.Auth.Password == "" {
+			return errors.New("auth is enabled but username or password is empty")
+		}
+		if c.Auth.Password == "change-me" {
+			return errors.New("auth is enabled with the example password; set auth.password")
+		}
+	}
+	if b := c.UI.BasePath; b != "" && !strings.HasPrefix(b, "/") {
+		return errors.New("ui.basePath must start with /")
+	}
+	return nil
 }

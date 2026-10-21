@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"errors"
 	"flag"
@@ -35,6 +36,9 @@ func main() {
 	if *blocky != "" {
 		cfg.Blocky.URL = strings.TrimRight(*blocky, "/")
 	}
+	if err := cfg.Validate(); err != nil {
+		log.Fatal(err)
+	}
 
 	srv, err := server.New(cfg, webFS)
 	if err != nil {
@@ -61,5 +65,9 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
-	_ = httpServer.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := httpServer.Shutdown(ctx); err != nil {
+		log.Printf("shutdown: %v", err)
+	}
 }

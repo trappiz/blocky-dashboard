@@ -4,13 +4,12 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
-	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
-	"os"
+	"net/url"
+	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/trappiz/blocky-dashboard/internal/blocky"
@@ -19,11 +18,10 @@ import (
 )
 
 type Server struct {
-	cfg       config.Config
-	blocky    *blocky.Client
-	logs      *querylog.Reader
-	web       fs.FS
-	historyMu sync.Mutex
+	cfg    config.Config
+	blocky *blocky.Client
+	logs   *querylog.Reader
+	web    fs.FS
 }
 
 func New(cfg config.Config, embedded embed.FS) (*Server, error) {
@@ -47,7 +45,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/cache/flush", s.cacheFlush)
 	mux.HandleFunc("/api/lists/refresh", s.listsRefresh)
 	mux.HandleFunc("/", s.static)
-	return s.auth(logging(mux))
+
+	var h http.Handler = sameOrigin(mux)
+	if base := strings.TrimRight(s.cfg.UI.BasePath, "/"); base != "" {
+		inner := http.StripPrefix(base, h)
+		h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == base {
+				http.Redirect(w, r, base+"/", http.StatusMovedPermanently)
+				return
+			}
+			inner.ServeHTTP(w, r)
+		})
+	}
+	return s.auth(logging(h))
 }
 
 func (s *Server) auth(next http.Handler) http.Handler {
@@ -70,6 +80,30 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		}
 		w.Header().Set("WWW-Authenticate", `Basic realm="Blocky Dashboard"`)
 		http.Error(w, "authentication required", http.StatusUnauthorized)
+	})
+}
+
+// sameOrigin rejects state-changing requests sent from other sites. Browsers
+// attach Basic Auth credentials automatically, so without this any page could
+// POST to the dashboard on the user's behalf.
+func sameOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" {
+			http.Error(w, "cross-site request rejected", http.StatusForbidden)
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" {
+			u, err := url.Parse(origin)
+			if err != nil || u.Host != r.Host {
+				http.Error(w, "cross-origin request rejected", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -114,20 +148,21 @@ type queryRequest struct {
 
 func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	var q queryRequest
 	if err := json.NewDecoder(r.Body).Decode(&q); err != nil || strings.TrimSpace(q.Query) == "" {
-		http.Error(w, "query and type are required", 400)
+		http.Error(w, "query is required", http.StatusBadRequest)
 		return
 	}
+	q.Query = strings.TrimSpace(q.Query)
 	if q.Type == "" {
 		q.Type = "A"
 	}
 	data, _, err := s.blocky.Do(r.Context(), http.MethodPost, "/api/query", nil, q)
 	if err != nil {
-		http.Error(w, err.Error(), 502)
+		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -136,42 +171,55 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) queryLog(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", 405)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	entries, err := s.logs.Read(r.URL.Query().Get("q"), r.URL.Query().Get("client"), r.URL.Query().Get("type"), 200)
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	entries, err := s.logs.Read(q.Get("q"), q.Get("client"), q.Get("type"), limit)
 	if err != nil {
-		writeJSON(w, 503, map[string]any{"enabled": false, "error": err.Error()})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"enabled": s.logs.Enabled(), "error": err.Error()})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"enabled": true, "entries": entries})
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "entries": entries})
 }
 
+// Blocky exposes enable/disable as GET, but the dashboard only accepts POST so
+// that state changes are covered by the same-origin check.
 func (s *Server) enableBlocking(w http.ResponseWriter, r *http.Request) {
 	s.action(w, r, http.MethodGet, "/api/blocking/enable", nil)
 }
+
 func (s *Server) disableBlocking(w http.ResponseWriter, r *http.Request) {
-	s.action(w, r, http.MethodGet, "/api/blocking/disable", r.URL.Query())
+	q := url.Values{}
+	for _, k := range []string{"duration", "groups"} {
+		if v := r.URL.Query().Get(k); v != "" {
+			q.Set(k, v)
+		}
+	}
+	s.action(w, r, http.MethodGet, "/api/blocking/disable", q)
 }
+
 func (s *Server) cacheFlush(w http.ResponseWriter, r *http.Request) {
 	s.action(w, r, http.MethodPost, "/api/cache/flush", nil)
 }
+
 func (s *Server) listsRefresh(w http.ResponseWriter, r *http.Request) {
 	s.action(w, r, http.MethodPost, "/api/lists/refresh", nil)
 }
 
-func (s *Server) action(w http.ResponseWriter, r *http.Request, method, path string, query map[string][]string) {
-	if r.Method != method {
-		http.Error(w, "method not allowed", 405)
+func (s *Server) action(w http.ResponseWriter, r *http.Request, blockyMethod, path string, query url.Values) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	data, _, err := s.blocky.Do(r.Context(), method, path, query, nil)
+	data, _, err := s.blocky.Do(r.Context(), blockyMethod, path, query, nil)
 	if err != nil {
-		http.Error(w, err.Error(), 502)
+		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if len(data) == 0 {
+	if len(data) == 0 || !json.Valid(data) {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 		return
 	}
@@ -180,13 +228,31 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request, method, path str
 
 func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/")
-	if path == "" {
-		path = "index.html"
+	if path == "" || path == "index.html" {
+		s.index(w, r)
+		return
 	}
 	if _, err := fs.Stat(s.web, path); err != nil {
-		path = "index.html"
+		if strings.HasPrefix(path, "api/") {
+			http.NotFound(w, r)
+			return
+		}
+		s.index(w, r)
+		return
 	}
-	http.FileServer(http.FS(s.web)).ServeHTTP(w, r)
+	http.FileServerFS(s.web).ServeHTTP(w, r)
+}
+
+func (s *Server) index(w http.ResponseWriter, r *http.Request) {
+	b, err := fs.ReadFile(s.web, "index.html")
+	if err != nil {
+		http.Error(w, "index.html missing", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'")
+	_, _ = w.Write(b)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -202,6 +268,3 @@ func logging(next http.Handler) http.Handler {
 		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(start).Round(time.Millisecond))
 	})
 }
-
-var _ = fmt.Sprintf
-var _ = os.ErrNotExist

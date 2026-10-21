@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Blocky Dashboard</title>
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span id="connDot" class="dot" title="Connecting…"></span>
+      <div>
+        <b id="appTitle">Blocky Dashboard</b>
+        <span id="instance" class="muted"></span>
+      </div>
+    </div>
+
+    <div class="top-actions">
+      <details id="blockingMenu" class="menu">
+        <summary id="blockingPill" class="pill">Blocking …</summary>
+        <div class="menu-body" id="blockingOptions">
+          <p class="menu-label">Pause blocking for</p>
+          <button type="button" data-disable="5m">5 minutes</button>
+          <button type="button" data-disable="15m">15 minutes</button>
+          <button type="button" data-disable="1h">1 hour</button>
+          <button type="button" data-disable="0">Until re-enabled</button>
+          <hr>
+          <button type="button" id="enableBtn" class="primary">Resume blocking</button>
+        </div>
+      </details>
+
+      <button type="button" id="refreshBtn" class="icon-btn" title="Refresh now" aria-label="Refresh now">↻</button>
+
+      <details class="menu menu-right">
+        <summary class="icon-btn" title="Maintenance" aria-label="Maintenance">⋯</summary>
+        <div class="menu-body">
+          <p class="menu-label">Maintenance</p>
+          <button type="button" data-action="lists/refresh" data-confirm="Refresh all lists?">Refresh lists</button>
+          <button type="button" data-action="cache/flush" data-confirm="Clear the DNS cache?">Clear cache</button>
+        </div>
+      </details>
+    </div>
+  </div>
+</header>
+
+<main class="page">
+  <div id="statsError" class="banner" hidden></div>
+
+  <section class="kpis" aria-label="Summary">
+    <article class="kpi"><span>Queries</span><strong id="kQueries">—</strong><small id="kWindow">last 24h</small></article>
+    <article class="kpi"><span>Blocked</span><strong id="kBlocked">—</strong><small id="kBlockedPct">—</small></article>
+    <article class="kpi"><span>Cache hit rate</span><strong id="kCache">—</strong><small id="kCacheEntries">—</small></article>
+    <article class="kpi"><span>Avg response</span><strong id="kLatency">—</strong><small>milliseconds</small></article>
+    <article class="kpi"><span>Denylist entries</span><strong id="kDeny">—</strong><small id="kAllow">—</small></article>
+  </section>
+
+  <section class="row row-chart">
+    <article class="panel">
+      <div class="panel-head">
+        <h2>Queries over time</h2>
+        <div class="legend"><span class="sw sw-total"></span>Total <span class="sw sw-blocked"></span>Blocked</div>
+      </div>
+      <div id="chart" class="chart"></div>
+    </article>
+    <article class="panel">
+      <div class="panel-head"><h2>Outcomes</h2></div>
+      <div id="outcomes" class="bars"></div>
+      <div class="panel-head sub"><h2>Query types</h2></div>
+      <div id="types" class="bars"></div>
+    </article>
+  </section>
+
+  <section class="row row-3">
+    <article class="panel"><div class="panel-head"><h2>Top domains</h2></div><ol id="topDomains" class="toplist" data-kind="domain"></ol></article>
+    <article class="panel"><div class="panel-head"><h2>Top blocked</h2></div><ol id="blockedDomains" class="toplist" data-kind="domain"></ol></article>
+    <article class="panel"><div class="panel-head"><h2>Top clients</h2></div><ol id="topClients" class="toplist" data-kind="client"></ol></article>
+  </section>
+
+  <section class="panel" id="tester">
+    <div class="panel-head"><h2>Test a domain</h2><span class="muted small">Runs the query through Blocky and shows its decision</span></div>
+    <form id="queryForm" class="query-row">
+      <input id="domain" placeholder="example.com" autocomplete="off" spellcheck="false" required aria-label="Domain">
+      <select id="qtype" aria-label="Record type">
+        <option>A</option><option>AAAA</option><option>CNAME</option><option>MX</option>
+        <option>TXT</option><option>NS</option><option>PTR</option><option>SRV</option><option>HTTPS</option>
+      </select>
+      <button type="submit" class="primary">Query</button>
+    </form>
+    <div id="queryResult" class="query-result" hidden></div>
+  </section>
+
+  <section class="panel" id="logs" hidden>
+    <div class="panel-head"><h2>Query log</h2><span id="logStatus" class="muted small"></span></div>
+    <form id="logForm" class="filters">
+      <input id="logSearch" type="search" placeholder="Search domain or client…" autocomplete="off" aria-label="Search">
+      <input id="logClient" placeholder="Client" autocomplete="off" aria-label="Client">
+      <select id="logType" aria-label="Outcome">
+        <option value="">All outcomes</option>
+        <option>RESOLVED</option><option>CACHED</option><option>BLOCKED</option>
+        <option>CONDITIONAL</option><option>CUSTOMDNS</option><option>HOSTSFILE</option>
+        <option>FILTERED</option><option>NOTFQDN</option><option>SPECIAL</option>
+      </select>
+      <button type="button" id="logClear">Clear</button>
+    </form>
+    <div id="logsTable" class="table-wrap"></div>
+  </section>
+</main>
+
+<footer class="page footer"><span>Blocky Dashboard</span><span id="updated">—</span></footer>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

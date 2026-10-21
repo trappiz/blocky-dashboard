@@ -1,6 +1,7 @@
 package querylog
 
 import (
+	"bufio"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ type Entry struct {
 	ClientIP     string    `json:"clientIP"`
 	ClientName   string    `json:"clientName"`
 	Question     string    `json:"question"`
+	QuestionType string    `json:"questionType"`
 	ResponseType string    `json:"responseType"`
 	ResponseCode string    `json:"returnCode"`
 	Reason       string    `json:"reason"`
@@ -34,78 +36,121 @@ type Reader struct {
 func New(cfg config.QueryLogConfig) *Reader { return &Reader{cfg: cfg} }
 
 func (r *Reader) Enabled() bool {
-	return strings.EqualFold(r.cfg.Type, "csv") && r.cfg.Target != ""
+	t := strings.ToLower(r.cfg.Type)
+	return (t == "csv" || t == "csv-client") && r.cfg.Target != ""
 }
 
-func (r *Reader) Read(filter, client, rtype string, limit int) ([]Entry, error) {
+type filter struct {
+	needle, client, rtype string
+}
+
+func (f filter) match(e Entry) bool {
+	if f.needle != "" && !strings.Contains(strings.ToLower(e.Question+" "+e.ClientName+" "+e.ClientIP), f.needle) {
+		return false
+	}
+	if f.client != "" && !strings.EqualFold(f.client, e.ClientName) && !strings.EqualFold(f.client, e.ClientIP) {
+		return false
+	}
+	if f.rtype != "" && !strings.EqualFold(f.rtype, e.ResponseType) {
+		return false
+	}
+	return true
+}
+
+// Read returns the newest entries matching the filters, newest first.
+func (r *Reader) Read(needle, client, rtype string, limit int) ([]Entry, error) {
 	if !r.Enabled() {
 		return nil, errors.New("query logging is not configured")
 	}
-	if limit <= 0 || limit > 500 {
-		limit = 100
+	if limit <= 0 || limit > 1000 {
+		limit = 200
 	}
 	days := r.cfg.Days
 	if days < 1 {
 		days = 1
 	}
-	var files []string
-	now := time.Now()
-	for i := 0; i < days; i++ {
-		d := now.AddDate(0, 0, -i)
-		// Blocky uses YYYY-MM-DD.csv for daily CSV logs. Accept common variants.
-		candidates := []string{
-			filepath.Join(r.cfg.Target, d.Format("2006-01-02")+".csv"),
-			filepath.Join(r.cfg.Target, "query-"+d.Format("2006-01-02")+".csv"),
-		}
-		for _, p := range candidates {
-			if _, err := os.Stat(p); err == nil {
-				files = append(files, p)
-			}
-		}
-	}
-	sort.Strings(files)
+	f := filter{needle: strings.ToLower(strings.TrimSpace(needle)), client: strings.TrimSpace(client), rtype: strings.TrimSpace(rtype)}
 
 	var out []Entry
-	for _, path := range files {
-		entries, err := readFile(path, filter, client, rtype, limit-len(out))
+	now := time.Now()
+	for i := 0; i < days && len(out) < limit; i++ {
+		files, err := filesForDay(r.cfg.Target, now.AddDate(0, 0, -i))
 		if err != nil {
-			return out, fmt.Errorf("%s: %w", path, err)
+			return nil, err
 		}
-		out = append(out, entries...)
-		if len(out) >= limit {
-			break
+		var day []Entry
+		for _, path := range files {
+			entries, err := readFile(path, f, limit)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", path, err)
+			}
+			day = append(day, entries...)
 		}
+		sort.SliceStable(day, func(a, b int) bool { return day[a].Time.After(day[b].Time) })
+		if n := limit - len(out); len(day) > n {
+			day = day[:n]
+		}
+		out = append(out, day...)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Time.After(out[j].Time) })
 	return out, nil
 }
 
-func readFile(path, filter, client, rtype string, limit int) ([]Entry, error) {
-	f, err := os.Open(path)
+// filesForDay finds log files for one day. Blocky writes YYYY-MM-DD_ALL.log
+// (csv) or YYYY-MM-DD_<client>.log (csv-client); .csv variants are also accepted.
+func filesForDay(dir string, d time.Time) ([]string, error) {
+	matches, err := filepath.Glob(filepath.Join(dir, d.Format("2006-01-02")+"*"))
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-
-	cr := csv.NewReader(f)
-	cr.ReuseRecord = true
-	header, err := cr.Read()
-	if err != nil {
-		return nil, err
+	if alt, _ := filepath.Glob(filepath.Join(dir, "query-"+d.Format("2006-01-02")+"*")); len(alt) > 0 {
+		matches = append(matches, alt...)
 	}
-	index := map[string]int{}
-	for i, h := range header {
-		index[strings.ToLower(strings.TrimSpace(h))] = i
-	}
-
-	get := func(row []string, names ...string) string {
-		for _, n := range names {
-			if i, ok := index[strings.ToLower(n)]; ok && i < len(row) {
-				return row[i]
-			}
+	var files []string
+	for _, m := range matches {
+		if ext := filepath.Ext(m); ext == ".log" || ext == ".csv" {
+			files = append(files, m)
 		}
-		return ""
 	}
+	return files, nil
+}
+
+// blockyColumns is the column order of Blocky's headerless file log.
+var blockyColumns = []string{"time", "clientip", "clientname", "duration", "reason", "question", "answer", "returncode", "responsetype", "questiontype", "instance"}
+
+var columnAliases = map[string]string{
+	"client_ip": "clientip", "client_name": "clientname", "clientnames": "clientname",
+	"query": "question", "question_name": "question", "questionname": "question",
+	"response_type": "responsetype",
+	"return_code":   "returncode", "responsecode": "returncode", "response_code": "returncode",
+	"responsereason": "reason", "response_reason": "reason",
+	"responseanswer": "answer", "response_answer": "answer",
+	"durationms": "duration", "duration_ms": "duration",
+	"question_type": "questiontype",
+	"timestamp":     "time", "date": "time", "start": "time",
+}
+
+// readFile returns at most limit matching entries from the end of the file.
+func readFile(path string, f filter, limit int) ([]Entry, error) {
+	fh, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer fh.Close()
+
+	br := bufio.NewReader(fh)
+	first, _ := br.Peek(4096)
+	cr := csv.NewReader(br)
+	if strings.Contains(string(first), "\t") {
+		cr.Comma = '\t'
+	}
+	cr.FieldsPerRecord = -1
+	cr.LazyQuotes = true
+
+	index := map[string]int{}
+	for i, name := range blockyColumns {
+		index[name] = i
+	}
+	headerChecked := false
 
 	var out []Entry
 	for {
@@ -116,46 +161,71 @@ func readFile(path, filter, client, rtype string, limit int) ([]Entry, error) {
 		if err != nil {
 			return nil, err
 		}
-
-		e := Entry{
-			ClientIP:     get(row, "clientIP", "clientip", "client_ip"),
-			ClientName:   get(row, "clientName", "clientname", "client_name"),
-			Question:     get(row, "question", "query"),
-			ResponseType: get(row, "responseType", "response_type"),
-			ResponseCode: get(row, "returnCode", "return_code", "responseCode", "response_code"),
-			Reason:       get(row, "responseReason", "response_reason", "reason"),
-			Answer:       get(row, "responseAnswer", "response_answer", "answer"),
-		}
-		if v := get(row, "duration"); v != "" {
-			e.DurationMS, _ = strconv.ParseFloat(strings.TrimSpace(v), 64)
-		}
-		if v := get(row, "time", "timestamp", "date"); v != "" {
-			for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05", "2006-01-02T15:04:05.000Z07:00"} {
-				if t, x := time.Parse(layout, strings.TrimSpace(v)); x == nil {
-					e.Time = t
-					break
-				}
+		if !headerChecked {
+			headerChecked = true
+			if len(row) > 0 && parseTime(row[0]).IsZero() {
+				index = headerIndex(row)
+				continue
 			}
 		}
-		if e.Time.IsZero() {
-			e.Time = time.Now()
-		}
 
-		needle := strings.ToLower(strings.TrimSpace(filter))
-		if needle != "" && !strings.Contains(strings.ToLower(e.Question+" "+e.ClientName+" "+e.ClientIP), needle) {
+		e := toEntry(row, index)
+		if !f.match(e) {
 			continue
 		}
-		if client != "" && !strings.EqualFold(client, e.ClientName) && !strings.EqualFold(client, e.ClientIP) {
-			continue
-		}
-		if rtype != "" && !strings.EqualFold(rtype, e.ResponseType) {
-			continue
-		}
-
 		out = append(out, e)
-		if len(out) >= limit {
-			break
+		if len(out) >= 2*limit {
+			out = append(out[:0], out[len(out)-limit:]...)
 		}
 	}
+	if len(out) > limit {
+		out = out[len(out)-limit:]
+	}
 	return out, nil
+}
+
+func headerIndex(row []string) map[string]int {
+	index := map[string]int{}
+	for i, h := range row {
+		k := strings.ToLower(strings.TrimSpace(h))
+		if alias, ok := columnAliases[k]; ok {
+			k = alias
+		}
+		if _, seen := index[k]; !seen {
+			index[k] = i
+		}
+	}
+	return index
+}
+
+func toEntry(row []string, index map[string]int) Entry {
+	get := func(name string) string {
+		if i, ok := index[name]; ok && i < len(row) {
+			return strings.TrimSpace(row[i])
+		}
+		return ""
+	}
+	e := Entry{
+		Time:         parseTime(get("time")),
+		ClientIP:     get("clientip"),
+		ClientName:   get("clientname"),
+		Question:     get("question"),
+		QuestionType: get("questiontype"),
+		ResponseType: get("responsetype"),
+		ResponseCode: get("returncode"),
+		Reason:       get("reason"),
+		Answer:       get("answer"),
+	}
+	e.DurationMS, _ = strconv.ParseFloat(get("duration"), 64)
+	return e
+}
+
+func parseTime(v string) time.Time {
+	v = strings.TrimSpace(v)
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999 -0700 MST", "2006-01-02 15:04:05"} {
+		if t, err := time.ParseInLocation(layout, v, time.Local); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }

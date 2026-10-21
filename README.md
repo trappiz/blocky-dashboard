@@ -6,17 +6,14 @@ The project takes inspiration from [BlockyUI](https://github.com/GabeDuarteM/blo
 
 ## What is included
 
-- Overview dashboard using Blocky's native `/api/stats`
-- Queries-over-time chart
-- Outcome breakdown
-- Top domains
-- Top blocked domains
-- Top clients
-- List and cache gauges
+- Single-page dashboard: everything on one screen, no navigation
+- Blocking status and timed pause (with live countdown) always visible in the header
+- Summary cards, queries-over-time chart, outcome and query-type breakdown using Blocky's `/api/stats`
+- Top domains, top blocked domains and top clients — click one to filter the query log
 - DNS query tester with result/reason/response-code presentation
-- Blocking controls with timed disable
-- Cache flush and list refresh
-- Optional Blocky CSV query-log reader with domain/client/outcome filtering
+- Cache flush and list refresh (with confirmation)
+- Optional query-log reader for Blocky's `csv`/`csv-client` file logs, with search-as-you-type and client/outcome filters
+- Light and dark theme following the system setting
 - HTTP Basic Authentication or trusted reverse-proxy header token
 - Custom Blocky request headers / bearer token
 - Responsive UI
@@ -28,7 +25,7 @@ Blocky's statistics API provides a rolling 24-hour window, hourly data, top doma
 
 ## Query logs
 
-Blocky can write query logs to CSV, SQLite, MySQL/MariaDB, PostgreSQL/Timescale, and other targets. This dashboard currently reads **CSV** logs directly because that keeps the dashboard's binary and operational footprint small.
+Blocky can write query logs to CSV, SQLite, MySQL/MariaDB, PostgreSQL/Timescale, and other targets. This dashboard currently reads Blocky's **file logs** (`csv` and `csv-client`) directly because that keeps the dashboard's binary and operational footprint small. It reads Blocky's tab-separated `YYYY-MM-DD_*.log` files, and also accepts `.csv` files with a header row. `days` is how many daily files to search, newest first.
 
 Example Blocky configuration:
 
@@ -45,9 +42,11 @@ Then configure:
 "queryLog": {
   "type": "csv",
   "target": "/var/lib/blocky/logs",
-  "days": 7
+  "days": 2
 }
 ```
+
+The dashboard's service user needs read access to that directory.
 
 Query logs contain sensitive network activity. Restrict filesystem access and enable authentication before exposing the dashboard beyond a trusted network.
 
@@ -71,12 +70,15 @@ X-Blocky-Dashboard-Token: ...
 
 and configure `headerToken`. Do not expose that header-token mode directly to an untrusted network.
 
+The dashboard refuses to start with auth enabled and the example password. State-changing endpoints (blocking, cache flush, list refresh) only accept `POST` and reject cross-site requests.
+
 ## Build
 
-Requires Go 1.24+.
+Requires Go 1.25+.
 
 ```bash
-go build -trimpath -ldflags="-s -w" -o blocky-dashboard ./cmd/blocky-dashboard
+make build   # or: go build -trimpath -ldflags="-s -w" -o blocky-dashboard ./cmd/blocky-dashboard
+make test
 ```
 
 The frontend is embedded using `go:embed`.
@@ -106,6 +108,8 @@ dns.example.com {
 }
 ```
 
+To serve the dashboard under a sub-path (for example `https://example.com/dns/`), set `ui.basePath` to `/dns/` and proxy that path without stripping it.
+
 Keep Blocky's API listener private if possible and expose only the dashboard through your proxy.
 
 ## systemd
@@ -113,6 +117,8 @@ Keep Blocky's API listener private if possible and expose only the dashboard thr
 Create the service user, install the binary/config, then:
 
 ```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin blocky-dashboard
+sudo install -d -o blocky-dashboard -g blocky-dashboard /var/lib/blocky-dashboard
 sudo install -Dm755 blocky-dashboard /usr/local/bin/blocky-dashboard
 sudo install -Dm644 blocky-dashboard.service /etc/systemd/system/blocky-dashboard.service
 sudo install -Dm640 config.example.json /etc/blocky-dashboard/config.json
@@ -129,7 +135,6 @@ The included unit applies a restrictive systemd sandbox.
 - PostgreSQL/MySQL query-log adapters
 - query-log charts for arbitrary time ranges
 - query-log pagination and richer filters
-- client/domain drill-down pages
 - CSRF protection for state-changing operations when cookie auth is added
 - configurable groups for timed blocking
 - Prometheus metrics for the dashboard itself
