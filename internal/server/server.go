@@ -18,10 +18,9 @@ import (
 )
 
 type Server struct {
-	cfg    config.Config
-	blocky *blocky.Client
-	logs   *querylog.Reader
-	web    fs.FS
+	cfg       config.Config
+	instances []*instance
+	web       fs.FS
 }
 
 func New(cfg config.Config, embedded embed.FS) (*Server, error) {
@@ -29,13 +28,27 @@ func New(cfg config.Config, embedded embed.FS) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{cfg: cfg, blocky: blocky.New(cfg.Blocky), logs: querylog.New(cfg.QueryLog), web: web}, nil
+	return newServer(cfg, web), nil
+}
+
+func newServer(cfg config.Config, web fs.FS) *Server {
+	s := &Server{cfg: cfg, web: web}
+	for _, in := range cfg.ResolvedInstances() {
+		s.instances = append(s.instances, &instance{
+			ID:     config.Slug(in.Name),
+			Name:   in.Name,
+			blocky: blocky.New(in.BlockyConfig),
+			logs:   querylog.New(in.QueryLog),
+		})
+	}
+	return s
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.healthz)
 	mux.HandleFunc("/api/config", s.configAPI)
+	mux.HandleFunc("/api/overview", s.overview)
 	mux.HandleFunc("/api/status", s.status)
 	mux.HandleFunc("/api/stats", s.stats)
 	mux.HandleFunc("/api/query", s.query)
@@ -112,16 +125,28 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) configAPI(w http.ResponseWriter, r *http.Request) {
+	type inst struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		QueryLogs bool   `json:"queryLogs"`
+	}
+	list := make([]inst, 0, len(s.instances))
+	for _, in := range s.instances {
+		list = append(list, inst{ID: in.ID, Name: in.Name, QueryLogs: in.logs.Enabled()})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"title":              s.cfg.UI.Title,
-		"instance":           s.cfg.UI.Instance,
 		"autoRefreshSeconds": s.cfg.UI.AutoRefreshSeconds,
-		"queryLogs":          s.logs.Enabled(),
+		"instances":          list,
 	})
 }
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
-	data, code, err := s.blocky.Do(r.Context(), http.MethodGet, "/api/blocking/status", nil, nil)
+	in, ok := s.pick(w, r)
+	if !ok {
+		return
+	}
+	data, code, err := in.blocky.Do(r.Context(), http.MethodGet, "/api/blocking/status", nil, nil)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error(), "blockyStatus": code})
 		return
@@ -131,7 +156,11 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
-	data, code, err := s.blocky.Do(r.Context(), http.MethodGet, "/api/stats", nil, nil)
+	in, ok := s.pick(w, r)
+	if !ok {
+		return
+	}
+	data, code, err := in.blocky.Do(r.Context(), http.MethodGet, "/api/stats", nil, nil)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error(), "blockyStatus": code})
 		return
@@ -151,6 +180,10 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	in, ok := s.pick(w, r)
+	if !ok {
+		return
+	}
 	var q queryRequest
 	if err := json.NewDecoder(r.Body).Decode(&q); err != nil || strings.TrimSpace(q.Query) == "" {
 		http.Error(w, "query is required", http.StatusBadRequest)
@@ -160,7 +193,7 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 	if q.Type == "" {
 		q.Type = "A"
 	}
-	data, _, err := s.blocky.Do(r.Context(), http.MethodPost, "/api/query", nil, q)
+	data, _, err := in.blocky.Do(r.Context(), http.MethodPost, "/api/query", nil, q)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -174,11 +207,15 @@ func (s *Server) queryLog(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	in, ok := s.pick(w, r)
+	if !ok {
+		return
+	}
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	entries, err := s.logs.Read(q.Get("q"), q.Get("client"), q.Get("type"), limit)
+	entries, err := in.logs.Read(q.Get("q"), q.Get("client"), q.Get("type"), limit)
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"enabled": s.logs.Enabled(), "error": err.Error()})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"enabled": in.logs.Enabled(), "error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "entries": entries})
@@ -206,24 +243,6 @@ func (s *Server) cacheFlush(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listsRefresh(w http.ResponseWriter, r *http.Request) {
 	s.action(w, r, http.MethodPost, "/api/lists/refresh", nil)
-}
-
-func (s *Server) action(w http.ResponseWriter, r *http.Request, blockyMethod, path string, query url.Values) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	data, _, err := s.blocky.Do(r.Context(), blockyMethod, path, query, nil)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if len(data) == 0 || !json.Valid(data) {
-		_, _ = w.Write([]byte(`{"ok":true}`))
-		return
-	}
-	_, _ = w.Write(data)
 }
 
 func (s *Server) static(w http.ResponseWriter, r *http.Request) {

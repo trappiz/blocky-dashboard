@@ -23,11 +23,17 @@ function h(tag, attrs, ...children) {
 
 const state = {
   cfg: null,
-  stats: null,
-  blocking: null,
-  autoEnableAt: 0,
+  instances: [],      // [{id, name, queryLogs}] from api/config
+  overview: {},       // id -> {blocking, blockingError, stats, statsError}
+  autoEnableAt: {},   // id -> timestamp when Blocky re-enables blocking
+  cards: {},          // id -> card element references
+  selected: null,
   refreshTimer: null,
 };
+
+const multi = () => state.instances.length > 1;
+const selected = () => state.instances.find(i => i.id === state.selected) || state.instances[0];
+const withInstance = (path, id) => path + (path.includes('?') ? '&' : '?') + 'instance=' + encodeURIComponent(id);
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -37,7 +43,6 @@ async function api(path, opts) {
   if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
   return d;
 }
-const post = path => api(path, { method: 'POST' });
 
 let toastTimer;
 function toast(msg, isError) {
@@ -52,24 +57,29 @@ function toast(msg, isError) {
 /* ---------- loading ---------- */
 
 async function load() {
-  const [st, ss] = await Promise.allSettled([api('api/status'), api('api/stats')]);
-
-  const ok = st.status === 'fulfilled';
-  $('connDot').className = 'dot ' + (ok ? 'ok' : 'bad');
-  $('connDot').title = ok ? 'Blocky connected' : 'Blocky unavailable: ' + st.reason.message;
-  if (ok) renderBlocking(st.value.blocking || {});
-  else renderBlocking(null);
-
-  if (ss.status === 'fulfilled') {
-    $('statsError').hidden = true;
-    state.stats = ss.value;
-    renderStats(ss.value);
-  } else {
-    $('statsError').hidden = false;
-    $('statsError').textContent = 'Statistics unavailable: ' + ss.reason.message;
+  let data;
+  try {
+    data = await api('api/overview');
+  } catch (e) {
+    $('connDot').className = 'dot bad';
+    $('connDot').title = 'Dashboard unavailable: ' + e.message;
+    return;
+  }
+  for (const o of data.instances) {
+    state.overview[o.id] = o;
+    const b = o.blocking;
+    state.autoEnableAt[o.id] = b && !b.enabled && b.autoEnableInSec ? Date.now() + b.autoEnableInSec * 1000 : 0;
   }
 
-  if (state.cfg.queryLogs) loadLogs();
+  const up = data.instances.filter(o => o.blocking).length;
+  $('connDot').className = 'dot ' + (up === data.instances.length ? 'ok' : up ? 'warn' : 'bad');
+  $('connDot').title = `${up} of ${data.instances.length} instance${data.instances.length > 1 ? 's' : ''} reachable`;
+
+  state.instances.forEach(renderCard);
+  renderTotals();
+  updatePills();
+  renderDetails();
+  if (selected().queryLogs) loadLogs();
   $('updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
 }
 
@@ -79,62 +89,189 @@ function scheduleRefresh() {
   if (s > 0) state.refreshTimer = setInterval(() => { if (!document.hidden) load(); }, s * 1000);
 }
 
+/* ---------- instance cards ---------- */
+
+function metric(label) {
+  const value = h('strong', { text: '—' }), sub = h('small', { text: '' });
+  return { el: h('div', { class: 'metric' }, h('span', { text: label }), value, sub), value, sub };
+}
+
+function buildCard(inst) {
+  const m = { queries: metric('Queries'), blocked: metric('Blocked'), cache: metric('Cache hit'), latency: metric('Avg response') };
+  const pill = h('summary', { class: 'pill sm' });
+  const menu = h('details', { class: 'menu', hidden: !multi() }, pill, blockingMenuBody(inst.id, inst.name));
+  const card = h('article', {
+    class: 'inst-card', tabindex: multi() ? 0 : null, role: multi() ? 'button' : null,
+    'aria-label': multi() ? `Show details for ${inst.name}` : null,
+    onclick: e => { if (!e.target.closest('details')) select(inst.id); },
+    onkeydown: e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === card) { e.preventDefault(); select(inst.id); } },
+  },
+  h('div', { class: 'inst-head' }, h('span', { class: 'dot' }), h('b', { class: 'inst-name', text: inst.name }), menu),
+  h('div', { class: 'inst-metrics' }, Object.values(m).map(x => x.el)),
+  h('p', { class: 'inst-foot muted small' }),
+  h('p', { class: 'inst-error small', hidden: true }));
+  state.cards[inst.id] = { card, pill, menu, m, dot: card.querySelector('.dot'), foot: card.querySelector('.inst-foot'), error: card.querySelector('.inst-error') };
+  return card;
+}
+
+function renderCard(inst) {
+  const c = state.cards[inst.id], o = state.overview[inst.id] || {};
+  const st = o.stats || {}, x = st.summary || {};
+  c.card.classList.toggle('selected', multi() && inst.id === state.selected);
+  c.dot.className = 'dot ' + (o.blocking ? 'ok' : 'bad');
+
+  if (o.stats) {
+    c.m.queries.value.textContent = compact(x.queries || 0);
+    c.m.queries.sub.textContent = 'last 24h';
+    c.m.blocked.value.textContent = pct(x.blocked, x.queries);
+    c.m.blocked.sub.textContent = fmt(x.blocked) + ' queries';
+    c.m.cache.value.textContent = ((x.cacheHitRate || 0) * 100).toFixed(1) + '%';
+    c.m.cache.sub.textContent = fmt(st.cache && st.cache.entries) + ' entries';
+    c.m.latency.value.textContent = x.avgResponseMs != null ? Number(x.avgResponseMs).toFixed(1) : '—';
+    c.m.latency.sub.textContent = 'ms';
+    const sum = obj => Object.values(obj || {}).reduce((a, b) => a + Number(b || 0), 0);
+    const lists = st.lists || {};
+    c.foot.textContent = `${fmt(sum(lists.denylist))} denylisted · ${fmt(sum(lists.allowlist))} allowlisted`;
+  } else {
+    Object.values(c.m).forEach(m => { m.value.textContent = '—'; m.sub.textContent = ''; });
+    c.foot.textContent = '';
+  }
+  const err = o.blockingError || o.statsError;
+  c.error.hidden = !err;
+  c.error.textContent = err ? (o.blocking ? 'Stats unavailable: ' : 'Unreachable: ') + err : '';
+}
+
+function renderTotals() {
+  const el = $('totals');
+  const withStats = state.instances.map(i => state.overview[i.id]).filter(o => o && o.stats);
+  if (!multi() || !withStats.length) { el.textContent = ''; return; }
+  const q = withStats.reduce((a, o) => a + Number(o.stats.summary?.queries || 0), 0);
+  const b = withStats.reduce((a, o) => a + Number(o.stats.summary?.blocked || 0), 0);
+  el.textContent = `${fmt(q)} queries · ${pct(b, q)} blocked across ${withStats.length} of ${state.instances.length}`;
+}
+
 /* ---------- blocking ---------- */
 
-function renderBlocking(b) {
-  state.blocking = b;
-  state.autoEnableAt = b && b.autoEnableInSec ? Date.now() + b.autoEnableInSec * 1000 : 0;
-  updateBlockingPill();
+function blockingMenuBody(target, name) {
+  const label = target === 'all' ? (multi() ? 'Pause all instances for' : 'Pause blocking for') : `Pause ${name} for`;
+  const run = (path, msg) => blockingAction(target, path, msg);
+  return h('div', { class: 'menu-body' },
+    h('p', { class: 'menu-label', text: label }),
+    [['5m', '5 minutes'], ['15m', '15 minutes'], ['1h', '1 hour']].map(([d, text]) =>
+      h('button', { type: 'button', text, onclick: () => run('api/blocking/disable?duration=' + d, `Paused for ${text}`) })),
+    h('button', { type: 'button', text: 'Until re-enabled', onclick: () => run('api/blocking/disable', 'Paused') }),
+    h('hr'),
+    h('button', { type: 'button', class: 'primary resume', text: 'Resume blocking', onclick: () => run('api/blocking/enable', 'Blocking resumed') }));
 }
 
-function updateBlockingPill() {
+async function blockingAction(target, path, msg) {
+  document.querySelectorAll('details.menu[open]').forEach(d => { d.open = false; });
+  await runAction(withInstance(path, target), msg);
+}
+
+// runAction posts an action and reports per-instance results.
+async function runAction(path, msg) {
+  try {
+    const d = await api(path, { method: 'POST' });
+    const failed = (d.results || []).filter(r => !r.ok);
+    if (failed.length) toast(`${msg} on ${d.results.length - failed.length} of ${d.results.length}. Failed: ` + failed.map(r => `${r.name} (${r.error})`).join(', '), true);
+    else toast(msg + (d.results && d.results.length > 1 ? ` on all ${d.results.length} instances` : ''));
+  } catch (e) { toast(e.message, true); }
+  await load();
+}
+
+function countdown(id) {
+  const at = state.autoEnableAt[id];
+  if (!at) return '';
+  const left = Math.max(0, Math.round((at - Date.now()) / 1000));
+  if (left === 0) { state.autoEnableAt[id] = 0; setTimeout(load, 1500); }
+  return Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+}
+
+function pillText(o, id) {
+  const b = o && o.blocking;
+  if (!b) return { text: 'Unreachable', cls: '' };
+  if (b.enabled) return { text: 'Blocking on', cls: 'on' };
+  let text = 'Paused';
+  const left = countdown(id);
+  if (left) text += ' · ' + left;
+  if (b.disabledGroups && b.disabledGroups.length) text += ' (' + b.disabledGroups.join(', ') + ')';
+  return { text, cls: 'off' };
+}
+
+function updatePills() {
+  for (const inst of state.instances) {
+    const { text, cls } = pillText(state.overview[inst.id], inst.id);
+    const c = state.cards[inst.id];
+    c.pill.textContent = text;
+    c.pill.className = 'pill sm ' + cls;
+    c.menu.querySelector('.resume').hidden = cls !== 'off';
+  }
+
   const pill = $('blockingPill');
-  const b = state.blocking;
-  if (!b) {
-    pill.textContent = 'Blocking unknown';
-    pill.className = 'pill';
+  const known = state.instances.map(i => [i.id, state.overview[i.id]]).filter(([, o]) => o && o.blocking);
+  const resume = $('globalBlocking').querySelector('.resume');
+  if (!known.length) { pill.textContent = 'Blocking unknown'; pill.className = 'pill'; return; }
+  if (!multi()) {
+    const { text, cls } = pillText(known[0][1], known[0][0]);
+    pill.textContent = text.replace(/^Paused/, 'Blocking paused');
+    pill.className = 'pill ' + cls;
+    resume.hidden = cls !== 'off';
     return;
   }
-  let text = b.enabled ? 'Blocking on' : 'Blocking paused';
-  if (!b.enabled && state.autoEnableAt) {
-    const left = Math.max(0, Math.round((state.autoEnableAt - Date.now()) / 1000));
-    text += ' · ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
-    if (left === 0) { state.autoEnableAt = 0; setTimeout(load, 1500); }
-  }
-  if (!b.enabled && b.disabledGroups && b.disabledGroups.length) text += ' (' + b.disabledGroups.join(', ') + ')';
-  pill.textContent = text;
-  pill.className = 'pill ' + (b.enabled ? 'on' : 'off');
-  $('enableBtn').hidden = b.enabled;
+  const on = known.filter(([, o]) => o.blocking.enabled).length;
+  pill.textContent = on === known.length ? `Blocking on · ${on}/${state.instances.length}`
+    : on === 0 ? `Blocking paused · ${known.length}/${state.instances.length}`
+      : `Blocking on ${on}/${state.instances.length}`;
+  pill.className = 'pill ' + (on === known.length ? 'on' : on === 0 ? 'off' : 'mixed');
+  resume.hidden = on === known.length;
 }
 
-async function blockingAction(path, msg) {
-  $('blockingMenu').open = false;
-  try {
-    await post(path);
-    toast(msg);
-    await load();
-  } catch (e) { toast(e.message, true); }
+/* ---------- instance selection ---------- */
+
+function renderTabs() {
+  const tabs = $('instanceTabs');
+  tabs.hidden = !multi();
+  tabs.replaceChildren(...state.instances.map(i => h('button', {
+    type: 'button', role: 'tab', class: 'tab', 'data-id': i.id, text: i.name,
+    'aria-selected': String(i.id === state.selected), onclick: () => select(i.id),
+  })));
 }
 
-/* ---------- stats ---------- */
+function select(id) {
+  if (!state.instances.some(i => i.id === id) || id === state.selected) return;
+  state.selected = id;
+  try { localStorage.setItem('instance', id); } catch {}
+  history.replaceState(null, '', '#' + encodeURIComponent(id));
+  $('instanceTabs').querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', String(t.dataset.id === id)));
+  state.instances.forEach(renderCard);
+  $('queryResult').hidden = true;
+  $('logForm').reset();
+  renderDetails();
+  if (selected().queryLogs) loadLogs();
+}
 
-function renderStats(s) {
+function initialSelection() {
+  const fromHash = decodeURIComponent(location.hash.slice(1));
+  let stored = '';
+  try { stored = localStorage.getItem('instance') || ''; } catch {}
+  return [fromHash, stored].find(id => state.instances.some(i => i.id === id)) || state.instances[0].id;
+}
+
+/* ---------- details ---------- */
+
+function renderDetails() {
+  const inst = selected();
+  const o = state.overview[inst.id] || {};
+  $('detailsTitle').textContent = multi() ? 'Details · ' + inst.name : 'Details';
+  $('testerHint').textContent = multi() ? `Runs the query through ${inst.name} and shows its decision` : 'Runs the query through Blocky and shows its decision';
+  $('logs').hidden = !inst.queryLogs;
+  $('noLogs').hidden = inst.queryLogs || !multi() || !state.instances.some(i => i.queryLogs);
+
+  $('statsError').hidden = !!o.stats;
+  if (!o.stats) $('statsError').textContent = `Statistics unavailable for ${inst.name}: ` + (o.statsError || o.blockingError || 'loading…');
+  const s = o.stats || {};
   const x = s.summary || {};
-  $('kQueries').textContent = fmt(x.queries);
-  $('kBlocked').textContent = fmt(x.blocked);
-  $('kBlockedPct').textContent = x.queries ? pct(x.blocked, x.queries) + ' of queries' : '—';
-  $('kCache').textContent = ((x.cacheHitRate || 0) * 100).toFixed(1) + '%';
-  $('kCacheEntries').textContent = fmt(s.cache && s.cache.entries) + ' cached entries';
-  $('kLatency').textContent = x.avgResponseMs != null ? Number(x.avgResponseMs).toFixed(1) : '—';
-  if (s.start) {
-    $('kWindow').textContent = 'since ' + new Date(s.start).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
-  }
-
-  const sum = o => Object.values(o || {}).reduce((a, b) => a + Number(b || 0), 0);
-  const lists = s.lists || {};
-  $('kDeny').textContent = fmt(sum(lists.denylist));
-  $('kAllow').textContent = fmt(sum(lists.allowlist)) + ' allowlisted';
-
   renderChart();
   renderBars('outcomes', [
     ['Forwarded', x.forwarded], ['Cached', x.cached], ['Blocked', x.blocked, 'blocked'],
@@ -167,17 +304,19 @@ function renderTopList(id, data) {
   if (!rows.length) { el.replaceChildren(h('li', { class: 'muted small', text: 'No data' })); return; }
   const max = Math.max(...rows.map(r => Number(r.count) || 0), 1);
   const kind = el.dataset.kind;
+  const logs = selected().queryLogs;
   el.replaceChildren(...rows.map(r => {
     const bg = h('span', { class: 'bg' });
     bg.style.width = (Number(r.count) / max * 100) + '%';
+    const title = logs ? `Show ${r.name} in the query log` : kind === 'domain' ? `Test ${r.name}` : r.name;
     return h('li', {},
-      h('button', { type: 'button', class: 'top-item', title: `Show ${r.name} in the query log`, onclick: () => drillDown(kind, r.name) },
+      h('button', { type: 'button', class: 'top-item', title, onclick: () => drillDown(kind, r.name) },
         bg, h('span', { class: 'name', text: r.name }), h('b', { text: fmt(r.count) })));
   }));
 }
 
 function drillDown(kind, name) {
-  if (state.cfg.queryLogs) {
+  if (selected().queryLogs) {
     if (kind === 'client') { $('logClient').value = name; $('logSearch').value = ''; }
     else { $('logSearch').value = name; $('logClient').value = ''; }
     $('logType').value = '';
@@ -202,7 +341,8 @@ function svgEl(tag, attrs, ...children) {
 
 function renderChart() {
   const el = $('chart');
-  const points = (state.stats && state.stats.perHour) || [];
+  const stats = state.instances.length && (state.overview[selected().id] || {}).stats;
+  const points = (stats && stats.perHour) || [];
   if (!points.length) { el.replaceChildren(h('p', { class: 'muted small empty', text: 'No hourly statistics available.' })); return; }
 
   const w = Math.max(280, el.clientWidth), ht = el.clientHeight || 220;
@@ -249,7 +389,7 @@ async function runQuery(e) {
   out.hidden = false;
   out.replaceChildren(h('p', { class: 'muted small', text: 'Querying…' }));
   try {
-    const d = await api('api/query', {
+    const d = await api(withInstance('api/query', selected().id), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: $('domain').value.trim(), type: $('qtype').value }),
@@ -276,7 +416,7 @@ function outcomeBadge(type) {
 let logSeq = 0;
 async function loadLogs() {
   const seq = ++logSeq;
-  const params = new URLSearchParams({ q: $('logSearch').value.trim(), client: $('logClient').value.trim(), type: $('logType').value, limit: 200 });
+  const params = new URLSearchParams({ instance: selected().id, q: $('logSearch').value.trim(), client: $('logClient').value.trim(), type: $('logType').value, limit: 200 });
   try {
     const d = await api('api/query-log?' + params);
     if (seq !== logSeq) return;
@@ -336,16 +476,9 @@ function confirmClick(btn, run) {
 
 function wire() {
   $('refreshBtn').addEventListener('click', load);
-  $('enableBtn').addEventListener('click', () => blockingAction('api/blocking/enable', 'Blocking resumed'));
-  document.querySelectorAll('[data-disable]').forEach(btn => btn.addEventListener('click', () => {
-    const d = btn.dataset.disable;
-    blockingAction('api/blocking/disable' + (d !== '0' ? '?duration=' + encodeURIComponent(d) : ''),
-      d !== '0' ? `Blocking paused for ${btn.textContent}` : 'Blocking paused');
-  }));
-  document.querySelectorAll('[data-action]').forEach(btn => btn.addEventListener('click', () => confirmClick(btn, async () => {
+  document.querySelectorAll('[data-action]').forEach(btn => btn.addEventListener('click', () => confirmClick(btn, () => {
     btn.closest('details').open = false;
-    try { await post('api/' + btn.dataset.action); toast(btn.dataset.label + ' done'); load(); }
-    catch (e) { toast(e.message, true); }
+    runAction(withInstance('api/' + btn.dataset.action, 'all'), btn.dataset.label + ' done');
   })));
   // Close open menus when clicking elsewhere.
   document.addEventListener('click', e => {
@@ -361,28 +494,37 @@ function wire() {
   $('logForm').addEventListener('submit', e => { e.preventDefault(); loadLogs(); });
   $('logClear').addEventListener('click', () => { $('logForm').reset(); loadLogs(); });
 
+  window.addEventListener('hashchange', () => select(decodeURIComponent(location.hash.slice(1))));
   document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
   let lastWidth = 0;
   new ResizeObserver(entries => {
     const w = Math.round(entries[0].contentRect.width);
     if (w !== lastWidth) { lastWidth = w; renderChart(); }
   }).observe($('chart'));
-  setInterval(updateBlockingPill, 1000);
+  setInterval(updatePills, 1000);
 }
 
 async function init() {
-  wire();
   try {
     state.cfg = await api('api/config');
   } catch (e) {
-    state.cfg = { autoRefreshSeconds: 30, queryLogs: false };
     toast('Could not load dashboard config: ' + e.message, true);
+    return;
   }
+  state.instances = state.cfg.instances || [];
   const title = state.cfg.title || 'Blocky Dashboard';
-  document.title = state.cfg.instance ? `${title} · ${state.cfg.instance}` : title;
+  document.title = title;
   $('appTitle').textContent = title;
-  $('instance').textContent = state.cfg.instance || '';
-  $('logs').hidden = !state.cfg.queryLogs;
+  $('brandSub').textContent = multi() ? `${state.instances.length} instances` : (state.instances[0] && state.instances[0].name) || '';
+  $('instancesHead').hidden = !multi();
+  $('instances').classList.toggle('single', !multi());
+  $('maintLabel').textContent = multi() ? 'Maintenance · all instances' : 'Maintenance';
+  $('globalBlocking').replaceWith(Object.assign(blockingMenuBody('all'), { id: 'globalBlocking' }));
+  $('instances').replaceChildren(...state.instances.map(buildCard));
+
+  state.selected = initialSelection();
+  renderTabs();
+  wire();
   await load();
   scheduleRefresh();
 }

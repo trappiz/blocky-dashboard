@@ -34,7 +34,9 @@ func main() {
 		cfg.Listen = *listen
 	}
 	if *blocky != "" {
+		// A URL on the command line means "talk to this one Blocky".
 		cfg.Blocky.URL = strings.TrimRight(*blocky, "/")
+		cfg.Instances = nil
 	}
 	if err := cfg.Validate(); err != nil {
 		log.Fatal(err)
@@ -55,7 +57,10 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("blocky-dashboard listening on %s; Blocky=%s", cfg.Listen, cfg.Blocky.URL)
+		for _, in := range cfg.ResolvedInstances() {
+			log.Printf("instance %s: %s", in.Name, in.URL)
+		}
+		log.Printf("blocky-dashboard listening on %s", cfg.Listen)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal(err)
 		}

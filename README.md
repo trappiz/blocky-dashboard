@@ -7,6 +7,7 @@ The project takes inspiration from [BlockyUI](https://github.com/GabeDuarteM/blo
 ## What is included
 
 - Single-page dashboard: everything on one screen, no navigation
+- Multiple Blocky instances: a summary card per instance, details for the selected one, and blocking/maintenance actions sent to all instances at once
 - Blocking status and timed pause (with live countdown) always visible in the header
 - Summary cards, queries-over-time chart, outcome and query-type breakdown using Blocky's `/api/stats`
 - Top domains, top blocked domains and top clients — click one to filter the query log
@@ -22,6 +23,26 @@ The project takes inspiration from [BlockyUI](https://github.com/GabeDuarteM/blo
 - Everything embedded into one executable
 
 Blocky's statistics API provides a rolling 24-hour window, hourly data, top domains/blocked domains/clients, list counts, and cache entries. The dashboard consumes that directly rather than requiring Prometheus.
+
+## Multiple instances
+
+List several Blocky servers under `instances` instead of using the top-level `blocky`/`queryLog` blocks:
+
+```json
+"instances": [
+  { "name": "dns1", "url": "http://10.0.0.53:4000",
+    "queryLog": { "type": "csv", "target": "/var/lib/blocky/logs", "days": 2 } },
+  { "name": "dns2", "url": "http://10.0.0.54:4000", "token": "", "headers": {} }
+]
+```
+
+- The top of the page shows one card per instance: reachability, blocking state, queries, blocked share, cache hit rate and response time, plus a combined total.
+- Click a card (or use the tabs) to pick the instance for the details below: chart, outcome breakdown, top lists, domain tester and query log. The choice is kept in the URL (`#dns2`), so it can be bookmarked.
+- The header blocking menu and the maintenance menu act on **all** instances; each card's own blocking pill acts on just that instance. Partial failures are reported per instance.
+- Query logs are read from the dashboard's local filesystem, so each instance's `queryLog` only works if its log directory is reachable from the dashboard host (local, or a mounted share). Instances without one simply have no query-log section.
+- If your instances share Redis, Blocky already syncs blocking state between them; sending the action to all instances is harmless.
+
+`--blocky <url>` on the command line overrides the config and runs against that single instance.
 
 ## Query logs
 
