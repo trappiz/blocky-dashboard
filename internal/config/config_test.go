@@ -38,3 +38,32 @@ func TestSlug(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyEnv(t *testing.T) {
+	env := map[string]string{
+		EnvAuthPassword: "s3cret",
+		EnvBlockyToken:  "single",
+		"BLOCKY_DASHBOARD_INSTANCE_HOME_DNS_TOKEN": "home",
+	}
+	c := Config{
+		Auth:   AuthConfig{Password: "from-file", HeaderToken: "keep"},
+		Blocky: BlockyConfig{Token: "old"},
+		Instances: []InstanceConfig{
+			{Name: "Home DNS", BlockyConfig: BlockyConfig{URL: "http://1"}},
+			{Name: "office", BlockyConfig: BlockyConfig{URL: "http://2", Token: "file-token"}},
+		},
+	}
+	c.ApplyEnv(func(k string) string { return env[k] })
+	if c.Auth.Password != "s3cret" || c.Auth.HeaderToken != "keep" || c.Blocky.Token != "single" {
+		t.Fatalf("top-level overrides wrong: %+v %+v", c.Auth, c.Blocky)
+	}
+	if c.Instances[0].Token != "home" || c.Instances[1].Token != "file-token" {
+		t.Fatalf("instance tokens wrong: %+v", c.Instances)
+	}
+}
+
+func TestInstanceTokenEnv(t *testing.T) {
+	if got := InstanceTokenEnv("pi.hole #2"); got != "BLOCKY_DASHBOARD_INSTANCE_PI_HOLE_2_TOKEN" {
+		t.Fatalf("got %q", got)
+	}
+}

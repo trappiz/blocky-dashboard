@@ -1,0 +1,147 @@
+name: helm
+
+# Lints and renders the Helm chart on pull requests and pushes. For version
+# tags (v1.2.3) it packages the chart as version 1.2.3, pointing at the image
+# docker.yml pushes for the same tag, and publishes it to:
+#   - GHCR:       oci://ghcr.io/<owner>/charts/<chart name>  (always)
+#   - Docker Hub: oci://registry-1.docker.io/<DOCKERHUB_USERNAME>/<chart name>
+#                 (only when DOCKERHUB_USERNAME is set)
+#   - the GitHub Release for the tag, as a .tgz asset
+#
+# Uses the same settings as docker.yml (Settings → Secrets and variables →
+# Actions), all optional:
+#   variable DOCKERHUB_USERNAME  Docker Hub account (or organisation) to push to
+#   secret   DOCKERHUB_TOKEN     Docker Hub access token with Read & Write scope
+#   variable IMAGE_NAME          full Docker Hub image name; defaults to
+#                                <DOCKERHUB_USERNAME>/<this repository's name>
+#   variable CHART_NAME          chart repository name; defaults to
+#                                <image name without account>-chart. On Docker
+#                                Hub it must differ from the image repository,
+#                                or chart tags would overwrite image tags.
+#
+# Image names come from .github/actions/image-names, shared with docker.yml.
+# The chart's default image.repository is the Docker Hub image when Docker Hub
+# is configured, otherwise the GHCR image.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - charts/**
+      - .github/workflows/helm.yml
+  pull_request:
+    paths:
+      - charts/**
+      - .github/workflows/helm.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: helm-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CHART_DIR: charts/blocky-dashboard
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Lint and render with each ci/*-values.yaml
+        run: |
+          for values in "$CHART_DIR"/ci/*-values.yaml; do
+            echo "::group::$values"
+            helm lint --strict "$CHART_DIR" -f "$values"
+            helm template ci "$CHART_DIR" -f "$values" > /dev/null
+            echo "::endgroup::"
+          done
+
+  publish:
+    needs: lint
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # attach the chart to the GitHub Release
+      packages: write # push the chart to GHCR
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+
+      - name: Resolve image and chart names
+        id: images
+        uses: ./.github/actions/image-names
+        with:
+          dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
+          image-name: ${{ vars.IMAGE_NAME }}
+          chart-name: ${{ vars.CHART_NAME }}
+
+      - name: Check version and names
+        id: names
+        env:
+          DOCKERHUB_IMAGE: ${{ steps.images.outputs.dockerhub }}
+          IMAGE: ${{ steps.images.outputs.image }}
+          CHART: ${{ steps.images.outputs.chart }}
+          CHART_DOCKERHUB: ${{ steps.images.outputs.chart-dockerhub }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Tag $TAG is not a semantic version (v1.2.3)."
+            exit 1
+          fi
+          dockerhub=false
+          if [ -n "$DOCKERHUB_IMAGE" ]; then
+            dockerhub=true
+            if [ "${CHART_DOCKERHUB#oci://registry-1.}/$CHART" = "$DOCKERHUB_IMAGE" ]; then
+              echo "::error::Chart repository $CHART equals the Docker Hub image repository; set CHART_NAME to something else."
+              exit 1
+            fi
+          else
+            echo "::warning::DOCKERHUB_USERNAME is not set; publishing the chart to GHCR and the release only."
+          fi
+          {
+            echo "version=$version"
+            echo "image=$IMAGE"
+            echo "chart=$CHART"
+            echo "dockerhub=$dockerhub"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.names.outputs.version }}
+          IMAGE: ${{ steps.names.outputs.image }}
+          CHART: ${{ steps.names.outputs.chart }}
+        run: |
+          yq -i '.name = strenv(CHART)' "$CHART_DIR/Chart.yaml"
+          yq -i '.image.repository = strenv(IMAGE)' "$CHART_DIR/values.yaml"
+          helm lint --strict "$CHART_DIR"
+          helm package "$CHART_DIR" --version "$VERSION" --app-version "$VERSION" --destination dist
+
+      - name: Push to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          OCI: ${{ steps.images.outputs.chart-ghcr }}
+        run: |
+          echo "$GITHUB_TOKEN" | helm registry login ghcr.io --username "$ACTOR" --password-stdin
+          helm push dist/*.tgz "$OCI"
+
+      - name: Push to Docker Hub
+        if: steps.names.outputs.dockerhub == 'true'
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          OCI: ${{ steps.images.outputs.chart-dockerhub }}
+        run: |
+          echo "$DOCKERHUB_TOKEN" | helm registry login registry-1.docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
+          helm push dist/*.tgz "$OCI"
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tgz

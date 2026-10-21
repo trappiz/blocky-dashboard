@@ -1,0 +1,202 @@
+# Default values for blocky-dashboard.
+
+image:
+  # Image repository, e.g. docker.io/<account>/blocky-dashboard. Required.
+  # The published chart has it set to the image built by the same release.
+  repository: ""
+  # Defaults to the chart's appVersion.
+  tag: ""
+  # Pins the image by digest (sha256:...); takes precedence over tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 1
+revisionHistoryLimit: 3
+
+# Application configuration, rendered to /etc/blocky-dashboard/config.json.
+# Mirrors config.example.json. Secret fields (auth.password,
+# auth.headerToken, blocky.token and instances[].token) are moved into a
+# Secret and passed as environment variables instead of the ConfigMap.
+config:
+  ui:
+    title: Blocky Dashboard
+    # Name of the single instance (when instances is empty).
+    instance: blocky
+    # Serve the UI below this path, e.g. /blocky. Also used as the Ingress
+    # and HTTPRoute path.
+    basePath: /
+    autoRefreshSeconds: 30
+
+  auth:
+    enabled: false
+    username: admin
+    # Prefer secrets.existingSecret over setting these here.
+    password: ""
+    headerToken: ""
+
+  # Single Blocky instance, used when instances is empty.
+  blocky:
+    url: http://blocky.blocky.svc.cluster.local:4000
+    token: ""
+    headers: {}
+  queryLog:
+    # csv for Blocky's csv/csv-client file logs; empty disables query search.
+    type: ""
+    # Directory inside the container; mount it with queryLogVolumes.
+    target: ""
+    days: 1
+
+  # Several Blocky instances. Each entry: name, url, token, headers, queryLog.
+  instances: []
+  #  - name: primary
+  #    url: http://blocky-primary.blocky.svc:4000
+  #    token: ""
+  #    queryLog:
+  #      type: csv
+  #      target: /logs/primary
+  #      days: 2
+
+secrets:
+  # Use an existing Secret instead of the values above. Its keys are the
+  # environment variable names, all optional:
+  #   BLOCKY_DASHBOARD_AUTH_PASSWORD
+  #   BLOCKY_DASHBOARD_AUTH_HEADER_TOKEN
+  #   BLOCKY_DASHBOARD_BLOCKY_TOKEN              (single instance)
+  #   BLOCKY_DASHBOARD_INSTANCE_<NAME>_TOKEN     (per instance; name upper-cased,
+  #                                               non-alphanumerics → _)
+  existingSecret: ""
+
+# Read-only volumes holding Blocky's csv query logs. Point
+# config.queryLog.target / instances[].queryLog.target at mountPath.
+queryLogVolumes: []
+#  - name: primary-logs
+#    mountPath: /logs/primary
+#    source:
+#      hostPath:
+#        path: /var/lib/blocky/logs
+#        type: Directory
+#  - name: secondary-logs
+#    mountPath: /logs/secondary
+#    source:
+#      persistentVolumeClaim:
+#        claimName: blocky-logs
+#        readOnly: true
+#  - name: nfs-logs
+#    mountPath: /logs/nfs
+#    source:
+#      nfs:
+#        server: nas.example.com
+#        path: /export/blocky/logs
+#        readOnly: true
+
+extraEnv: []
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop: ["ALL"]
+
+containerPort: 3001
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  periodSeconds: 20
+  timeoutSeconds: 3
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Defaults to config.ui.basePath.
+  path: ""
+  pathType: Prefix
+  hosts: []
+  #  - dashboard.example.com
+  tls: []
+  #  - secretName: dashboard-tls
+  #    hosts: [dashboard.example.com]
+
+# Gateway API HTTPRoute.
+httpRoute:
+  enabled: false
+  annotations: {}
+  parentRefs: []
+  #  - name: gateway
+  #    namespace: gateway-system
+  hostnames: []
+  # Defaults to config.ui.basePath.
+  path: ""
+
+networkPolicy:
+  enabled: false
+  # Peers allowed to reach the dashboard; empty allows all.
+  ingressFrom: []
+  #  - namespaceSelector:
+  #      matchLabels:
+  #        kubernetes.io/metadata.name: ingress-nginx
+  # Restrict egress to DNS plus these rules; Blocky must stay reachable.
+  egress:
+    enabled: false
+    to: []
+    #  - namespaceSelector:
+    #      matchLabels:
+    #        kubernetes.io/metadata.name: blocky
+    #    ports:
+    #      - port: 4000
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""

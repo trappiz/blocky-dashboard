@@ -44,6 +44,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// Secrets (auth password, Blocky tokens) may come from the environment.
+	cfg.ApplyEnv(os.Getenv)
 	if *listen != "" {
 		cfg.Listen = *listen
 	}

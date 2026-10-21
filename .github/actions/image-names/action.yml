@@ -1,0 +1,80 @@
+name: Resolve image names
+description: >
+  Single place that turns repository settings into image names, so every
+  workflow pushes to and refers to the same images. Nothing is hard-coded:
+  the GHCR image follows the repository, the Docker Hub image follows the
+  DOCKERHUB_USERNAME / IMAGE_NAME repository variables (pass them as inputs).
+
+inputs:
+  dockerhub-username:
+    description: Docker Hub account or organisation (vars.DOCKERHUB_USERNAME). Empty disables Docker Hub.
+    default: ""
+  image-name:
+    description: Optional Docker Hub image name override (vars.IMAGE_NAME), e.g. account/blocky-dashboard.
+    default: ""
+  chart-name:
+    description: Optional Helm chart name override (vars.CHART_NAME). Defaults to <image name>-chart.
+    default: ""
+
+outputs:
+  ghcr:
+    description: GHCR image, e.g. ghcr.io/owner/repo
+    value: ${{ steps.names.outputs.ghcr }}
+  dockerhub:
+    description: Docker Hub image, e.g. docker.io/account/repo, or empty when not configured
+    value: ${{ steps.names.outputs.dockerhub }}
+  images:
+    description: Newline-separated list of all images, for docker/metadata-action
+    value: ${{ steps.names.outputs.images }}
+  image:
+    description: The image the Helm chart points at by default (Docker Hub when configured, else GHCR)
+    value: ${{ steps.names.outputs.image }}
+  chart:
+    description: Helm chart name
+    value: ${{ steps.names.outputs.chart }}
+  chart-ghcr:
+    description: GHCR OCI registry for the chart, e.g. oci://ghcr.io/owner/charts
+    value: ${{ steps.names.outputs.chart_ghcr }}
+  chart-dockerhub:
+    description: Docker Hub OCI registry for the chart, or empty when not configured
+    value: ${{ steps.names.outputs.chart_dockerhub }}
+
+runs:
+  using: composite
+  steps:
+    - id: names
+      shell: bash
+      env:
+        DOCKERHUB_USERNAME: ${{ inputs.dockerhub-username }}
+        IMAGE_NAME: ${{ inputs.image-name }}
+        CHART_NAME: ${{ inputs.chart-name }}
+        OWNER: ${{ github.repository_owner }}
+        REPOSITORY: ${{ github.repository }}
+        REPO_NAME: ${{ github.event.repository.name }}
+      run: |
+        lower() { tr '[:upper:]' '[:lower:]'; }
+        ghcr="ghcr.io/$(echo "$REPOSITORY" | lower)"
+        dockerhub=""
+        chart_dockerhub=""
+        if [ -n "$DOCKERHUB_USERNAME" ]; then
+          dockerhub="docker.io/$(echo "${IMAGE_NAME:-$DOCKERHUB_USERNAME/$REPO_NAME}" | lower)"
+          chart_dockerhub="oci://registry-1.docker.io/$(echo "$DOCKERHUB_USERNAME" | lower)"
+        fi
+        image="${dockerhub:-$ghcr}"
+        chart="$(echo "${CHART_NAME:-${image##*/}-chart}" | lower)"
+        chart_ghcr="oci://ghcr.io/$(echo "$OWNER" | lower)/charts"
+        {
+          echo "ghcr=$ghcr"
+          echo "dockerhub=$dockerhub"
+          echo "image=$image"
+          echo "chart=$chart"
+          echo "chart_ghcr=$chart_ghcr"
+          echo "chart_dockerhub=$chart_dockerhub"
+          echo "images<<EOF"
+          echo "$ghcr"
+          [ -n "$dockerhub" ] && echo "$dockerhub"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+        echo "GHCR image:       $ghcr"
+        echo "Docker Hub image: ${dockerhub:-(not configured)}"
+        echo "Helm chart:       $chart_ghcr/$chart${chart_dockerhub:+ and $chart_dockerhub/$chart}"

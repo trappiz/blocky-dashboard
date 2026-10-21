@@ -1,0 +1,12 @@
+apiVersion: v2
+name: blocky-dashboard
+description: Web dashboard for one or more Blocky DNS servers
+type: application
+# version and appVersion are replaced from the git tag when the chart is
+# published (see .github/workflows/helm.yml).
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - blocky
+  - dns
+  - dashboard

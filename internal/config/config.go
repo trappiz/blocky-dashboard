@@ -120,6 +120,37 @@ func (c Config) ResolvedInstances() []InstanceConfig {
 	return []InstanceConfig{{Name: name, BlockyConfig: c.Blocky, QueryLog: c.QueryLog}}
 }
 
+// Environment variables that override secrets in the config file, so they can
+// be injected from a secret store instead of written into config.json.
+const (
+	EnvAuthPassword    = "BLOCKY_DASHBOARD_AUTH_PASSWORD"
+	EnvAuthHeaderToken = "BLOCKY_DASHBOARD_AUTH_HEADER_TOKEN"
+	EnvBlockyToken     = "BLOCKY_DASHBOARD_BLOCKY_TOKEN"
+)
+
+// ApplyEnv overrides secrets with non-empty environment variables: the auth
+// password and header token, the single-instance Blocky token, and each
+// instance's token from InstanceTokenEnv(name).
+func (c *Config) ApplyEnv(getenv func(string) string) {
+	set := func(dst *string, key string) {
+		if v := getenv(key); v != "" {
+			*dst = v
+		}
+	}
+	set(&c.Auth.Password, EnvAuthPassword)
+	set(&c.Auth.HeaderToken, EnvAuthHeaderToken)
+	set(&c.Blocky.Token, EnvBlockyToken)
+	for i := range c.Instances {
+		set(&c.Instances[i].Token, InstanceTokenEnv(c.Instances[i].Name))
+	}
+}
+
+// InstanceTokenEnv names the variable holding an instance's Blocky token:
+// "Home DNS" → BLOCKY_DASHBOARD_INSTANCE_HOME_DNS_TOKEN.
+func InstanceTokenEnv(name string) string {
+	return "BLOCKY_DASHBOARD_INSTANCE_" + strings.ToUpper(strings.ReplaceAll(Slug(name), "-", "_")) + "_TOKEN"
+}
+
 var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
 
 // Slug turns an instance name into the stable id used in URLs.

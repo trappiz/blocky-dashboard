@@ -83,6 +83,11 @@ Enable Basic Auth:
 }
 ```
 
+Secrets can also come from environment variables, which override the file:
+`BLOCKY_DASHBOARD_AUTH_PASSWORD`, `BLOCKY_DASHBOARD_AUTH_HEADER_TOKEN`, `BLOCKY_DASHBOARD_BLOCKY_TOKEN`
+(single instance) and `BLOCKY_DASHBOARD_INSTANCE_<NAME>_TOKEN` per instance, where `<NAME>` is the
+instance name upper-cased with other characters replaced by `_` (`Office DNS` → `OFFICE_DNS`).
+
 Or have a trusted reverse proxy inject:
 
 ```text
@@ -168,18 +173,57 @@ so it runs fine with a read-only root filesystem.
 ### Publishing with GitHub Actions
 
 `.github/workflows/docker.yml` tests the code, then builds the image on every push and pull request.
-It pushes to Docker Hub for pushes to `main` (tags `edge` and `sha-<commit>`) and for version
-tags: `v1.2.3` produces `1.2.3`, `1.2`, `1` and `latest`. Pull requests only build.
+Pushes to `main` publish the tags `edge` and `sha-<commit>`; version tags publish `v1.2.3` as
+`1.2.3`, `1.2`, `1` and `latest`. Pull requests only build. Images go to:
 
-Nothing is hard-coded. Set these once under **Settings → Secrets and variables → Actions**:
+- **GitHub Container Registry**, always: `ghcr.io/<owner>/<repository>`, shown under this
+  repository's *Packages*. It uses the workflow's built-in `GITHUB_TOKEN`, so nothing needs setting up.
+  New packages start private; make it public under the package's settings if you want anonymous pulls.
+- **Docker Hub**, optional: enabled by setting the variables below.
+
+Nothing is hard-coded. Image names are derived in one place, `.github/actions/image-names`, from
+the repository name and these settings under **Settings → Secrets and variables → Actions**:
 
 | Name | Kind | Value |
 | --- | --- | --- |
-| `DOCKERHUB_USERNAME` | variable | Docker Hub account or organisation |
+| `DOCKERHUB_USERNAME` | variable, optional | Docker Hub account or organisation; leave unset for GHCR only |
 | `DOCKERHUB_TOKEN` | secret | Docker Hub [access token](https://app.docker.com/settings/personal-access-tokens) with Read & Write scope |
-| `IMAGE_NAME` | variable, optional | full image name; defaults to `<DOCKERHUB_USERNAME>/<repository name>` |
+| `IMAGE_NAME` | variable, optional | Docker Hub image name; defaults to `<DOCKERHUB_USERNAME>/<repository name>` |
+
+### Releases
+
+Push a version tag to cut a release:
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+`.github/workflows/release.yml` creates a GitHub Release with Linux binaries, `checksums.txt`,
+generated notes and the `docker pull` commands for both registries; `helm.yml` attaches the
+packaged Helm chart to the same release. Tags with a suffix (`v1.0.0-rc.1`) become pre-releases.
 
 Dependabot (`.github/dependabot.yml`) opens weekly PRs to keep the base images and actions current.
+
+## Kubernetes (Helm)
+
+A Helm chart lives in [`charts/blocky-dashboard`](charts/blocky-dashboard/README.md). It renders
+the config (single or multiple instances) into a ConfigMap, keeps the auth password and Blocky
+tokens in a Secret (or an existing one), runs the pod non-root with a read-only root filesystem,
+and can add an Ingress or HTTPRoute (honouring `ui.basePath`), a NetworkPolicy and read-only
+query-log volumes.
+
+```bash
+helm install blocky-dashboard oci://ghcr.io/<owner>/charts/blocky-dashboard-chart --version <version> -f my-values.yaml
+```
+
+`.github/workflows/helm.yml` lints and renders the chart on pull requests. For version tags it
+publishes it to `oci://ghcr.io/<owner>/charts`, to `oci://registry-1.docker.io/<DOCKERHUB_USERNAME>`
+when Docker Hub is configured (skipped with a warning otherwise), and attaches the `.tgz` to the
+GitHub Release. `image.repository` and the default tag point at the image of the same release: the
+Docker Hub image when configured, otherwise `ghcr.io/<owner>/<repository>`. It reuses
+`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` and `IMAGE_NAME`; the optional variable `CHART_NAME`
+(default `<image name>-chart`) names the chart repository, which on Docker Hub has to differ from the
+image repository.
 
 ## systemd
 

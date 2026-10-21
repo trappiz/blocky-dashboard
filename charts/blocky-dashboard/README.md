@@ -1,0 +1,161 @@
+# blocky-dashboard Helm chart
+
+Deploys [blocky-dashboard](../../README.md), a web UI for one or more
+[Blocky](https://0xerr0r.github.io/blocky/) DNS servers.
+
+The chart renders the app's JSON config from `values.yaml` into a ConfigMap
+mounted at `/etc/blocky-dashboard/config.json`. Secrets (the auth password,
+the auth header token and Blocky API tokens) never go into the ConfigMap: they
+are stored in a Secret, or read from one you manage, and passed to the app as
+environment variables. Changing either rolls the pod.
+
+The pod runs the distroless image as uid 65532 with a read-only root
+filesystem, no capabilities and the `RuntimeDefault` seccomp profile. Probes
+use `GET /healthz`, which bypasses auth and `config.ui.basePath`.
+
+## Install
+
+Each release publishes the chart as an OCI artifact to GHCR and, when Docker
+Hub is configured, to Docker Hub, and attaches the `.tgz` to the GitHub
+Release. `image.repository` and the default tag point at the image of the same
+release (the Docker Hub image when there is one, otherwise GHCR):
+
+```bash
+helm install blocky-dashboard oci://ghcr.io/<owner>/charts/blocky-dashboard-chart --version <version> -f my-values.yaml
+helm install blocky-dashboard oci://registry-1.docker.io/<account>/blocky-dashboard-chart --version <version> -f my-values.yaml
+```
+
+The chart is named `<image name>-chart` unless the `CHART_NAME` repository
+variable says otherwise; on Docker Hub it must differ from the image
+repository.
+
+From a checkout, set the image yourself:
+
+```bash
+helm install blocky-dashboard ./charts/blocky-dashboard --set image.repository=docker.io/<account>/blocky-dashboard -f my-values.yaml
+```
+
+## Single instance
+
+```yaml
+config:
+  ui:
+    instance: home-dns
+  blocky:
+    url: http://blocky.blocky.svc.cluster.local:4000
+  auth:
+    enabled: true
+    username: admin
+secrets:
+  existingSecret: blocky-dashboard   # holds BLOCKY_DASHBOARD_AUTH_PASSWORD
+```
+
+```bash
+kubectl create secret generic blocky-dashboard --from-literal=BLOCKY_DASHBOARD_AUTH_PASSWORD='...'
+```
+
+## Multiple instances with query logs
+
+Blocky's csv query logs are read from local directories, so mount each one
+read-only with `queryLogVolumes` and point the instance's `queryLog.target`
+at its `mountPath`. `source` is any Kubernetes volume source (hostPath,
+persistentVolumeClaim, nfs, ...).
+
+```yaml
+config:
+  ui:
+    basePath: /blocky
+  instances:
+    - name: primary
+      url: http://blocky-primary.blocky.svc:4000
+      queryLog: {type: csv, target: /logs/primary, days: 2}
+    - name: Office DNS
+      url: https://office-dns.example.com
+      queryLog: {type: csv, target: /logs/office, days: 2}
+
+queryLogVolumes:
+  - name: primary-logs
+    mountPath: /logs/primary
+    source:
+      persistentVolumeClaim: {claimName: blocky-logs, readOnly: true}
+  - name: office-logs
+    mountPath: /logs/office
+    source:
+      nfs: {server: nas.example.com, path: /export/blocky/logs, readOnly: true}
+
+secrets:
+  existingSecret: blocky-dashboard
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts: [dns.example.com]   # served at https://dns.example.com/blocky
+  tls:
+    - secretName: dns-example-com-tls
+      hosts: [dns.example.com]
+```
+
+A hostPath volume only works when the pod runs on the node holding the logs;
+pin it with `nodeSelector` or `affinity`.
+
+## Secrets
+
+Either set them in values (the chart creates a Secret):
+
+```yaml
+config:
+  auth: {enabled: true, password: "..."}
+  blocky: {token: "..."}            # single instance
+  instances:
+    - {name: primary, url: "...", token: "..."}
+```
+
+or set `secrets.existingSecret` to a Secret whose keys are environment
+variable names. All keys are optional:
+
+| Key | Overrides |
+| --- | --- |
+| `BLOCKY_DASHBOARD_AUTH_PASSWORD` | `auth.password` |
+| `BLOCKY_DASHBOARD_AUTH_HEADER_TOKEN` | `auth.headerToken` |
+| `BLOCKY_DASHBOARD_BLOCKY_TOKEN` | `blocky.token` (single instance) |
+| `BLOCKY_DASHBOARD_INSTANCE_<NAME>_TOKEN` | `instances[].token`; `<NAME>` is the instance name upper-cased with runs of other characters replaced by `_` (`Office DNS` → `OFFICE_DNS`) |
+
+Values in `blocky.headers` / `instances[].headers` stay in the ConfigMap; do
+not put credentials there.
+
+## Exposing the dashboard
+
+- `ingress.enabled`: an Ingress whose path defaults to `config.ui.basePath`.
+- `httpRoute.enabled`: a Gateway API `HTTPRoute` (requires `parentRefs`),
+  matching `PathPrefix` on `config.ui.basePath`.
+- `networkPolicy.enabled`: only allow traffic to the dashboard port, from
+  `networkPolicy.ingressFrom` peers (all when empty). With
+  `networkPolicy.egress.enabled`, egress is limited to DNS and
+  `networkPolicy.egress.to`; make sure Blocky stays reachable.
+
+## Values
+
+See [`values.yaml`](values.yaml) for every option with comments;
+[`values.schema.json`](values.schema.json) validates them. Commonly changed:
+
+| Value | Default | |
+| --- | --- | --- |
+| `image.repository` | set when published | Required when installing from source |
+| `image.tag` | chart `appVersion` | |
+| `image.digest` | `""` | Pins the image; overrides `tag` |
+| `config.*` | | App config, see `config.example.json` |
+| `secrets.existingSecret` | `""` | Secret with the keys above |
+| `queryLogVolumes` | `[]` | Read-only log volumes |
+| `service.port` | `80` | |
+| `ingress.*`, `httpRoute.*`, `networkPolicy.*`, `podDisruptionBudget.*` | disabled | |
+| `resources` | 10m / 32Mi requested, 128Mi limit | |
+| `nodeSelector`, `tolerations`, `affinity`, `topologySpreadConstraints` | empty | |
+| `podAnnotations`, `podLabels`, `extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts` | empty | |
+
+## Development
+
+```bash
+make helm-lint
+```
+
+lints and renders the chart with every file in `ci/`.

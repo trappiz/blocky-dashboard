@@ -1,0 +1,49 @@
+image:
+  repository: example/blocky-dashboard
+  tag: "1.2.3"
+config:
+  ui:
+    basePath: /blocky
+  auth:
+    enabled: true
+    password: s3cret
+  instances:
+    - name: Home DNS
+      url: http://blocky-home:4000
+      token: home-token
+      queryLog: {type: csv, target: /logs/home, days: 2}
+    - name: office
+      url: http://blocky-office:4000
+      headers: {X-Foo: bar}
+queryLogVolumes:
+  - name: home-logs
+    mountPath: /logs/home
+    source:
+      hostPath: {path: /var/lib/blocky/logs, type: Directory}
+  - name: office-logs
+    mountPath: /logs/office
+    source:
+      persistentVolumeClaim: {claimName: office-logs, readOnly: true}
+ingress:
+  enabled: true
+  className: nginx
+  hosts: [dash.example.com]
+  tls:
+    - secretName: dash-tls
+      hosts: [dash.example.com]
+httpRoute:
+  enabled: true
+  parentRefs:
+    - name: gw
+networkPolicy:
+  enabled: true
+  egress:
+    enabled: true
+    to:
+      - to:
+          - namespaceSelector: {}
+        ports:
+          - port: 4000
+podDisruptionBudget:
+  enabled: true
+replicaCount: 2

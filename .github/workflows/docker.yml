@@ -1,14 +1,17 @@
 name: docker
 
-# Builds the container image on every push and pull request, and pushes it to
-# Docker Hub for pushes to main (tag "edge") and version tags (v1.2.3 →
-# 1.2.3, 1.2, 1, latest).
-#
-# Configure once under Settings → Secrets and variables → Actions:
-#   variable DOCKERHUB_USERNAME  Docker Hub account (or organisation) to push to
-#   secret   DOCKERHUB_TOKEN     Docker Hub access token with Read & Write scope
-#   variable IMAGE_NAME          optional, full image name; defaults to
-#                                <DOCKERHUB_USERNAME>/<this repository's name>
+# Builds the container image on every push and pull request. Pushes to main
+# (tags "edge", "sha-<commit>") and version tags (v1.2.3 → 1.2.3, 1.2, 1,
+# latest) are published to:
+#   - GitHub Container Registry: ghcr.io/<owner>/<repo>, linked to this
+#     repository. Always on; uses the built-in GITHUB_TOKEN.
+#   - Docker Hub: optional, enabled by setting under
+#     Settings → Secrets and variables → Actions:
+#       variable DOCKERHUB_USERNAME  Docker Hub account (or organisation)
+#       secret   DOCKERHUB_TOKEN     access token with Read & Write scope
+#       variable IMAGE_NAME          optional, defaults to
+#                                    <DOCKERHUB_USERNAME>/<repository name>
+# Image names are resolved in .github/actions/image-names.
 
 on:
   push:
@@ -42,28 +45,35 @@ jobs:
   image:
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve image name
-        id: image
-        env:
-          IMAGE_NAME: ${{ vars.IMAGE_NAME }}
-          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
-          REPO_NAME: ${{ github.event.repository.name }}
-          OWNER: ${{ github.repository_owner }}
-        run: |
-          if [ "$PUSH" = "true" ] && [ -z "$DOCKERHUB_USERNAME" ]; then
-            echo "::error::Set the DOCKERHUB_USERNAME repository variable (and the DOCKERHUB_TOKEN secret) to push images."
-            exit 1
-          fi
-          name="${IMAGE_NAME:-${DOCKERHUB_USERNAME:-$OWNER}/$REPO_NAME}"
-          echo "name=$(echo "$name" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - name: Resolve image names
+        id: names
+        uses: ./.github/actions/image-names
+        with:
+          dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
+          image-name: ${{ vars.IMAGE_NAME }}
+
+      - name: Note when Docker Hub is off
+        if: env.PUSH == 'true' && steps.names.outputs.dockerhub == ''
+        run: echo "::warning::DOCKERHUB_USERNAME is not set; pushing to GHCR only."
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
+      - name: Log in to GHCR
         if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: env.PUSH == 'true' && steps.names.outputs.dockerhub != ''
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
@@ -73,7 +83,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ steps.image.outputs.name }}
+          images: ${{ steps.names.outputs.images }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -83,6 +93,7 @@ jobs:
             type=ref,event=pr
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -97,3 +108,17 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: ${{ env.PUSH == 'true' && 'mode=max' || 'false' }}
           sbom: ${{ env.PUSH == 'true' }}
+
+      - name: Summary
+        if: env.PUSH == 'true'
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "### Published image"
+            echo "Digest: \`$DIGEST\`"
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
