@@ -62,7 +62,7 @@ docker run -p 3001:3001 \
 Use the Helm chart in [`charts/blocky-dashboard`](charts/blocky-dashboard/README.md):
 
 ```bash
-helm install blocky-dashboard oci://ghcr.io/<owner>/charts/blocky-dashboard-chart --version <version> -f my-values.yaml
+helm install blocky-dashboard oci://ghcr.io/<owner>/charts/blocky-dashboard-chart --version <version without v> -f my-values.yaml
 ```
 
 ### systemd
@@ -172,11 +172,14 @@ The GitHub Actions workflows then:
 - `build.yml`: build binaries for Linux, macOS and Windows (amd64 and arm64) on every push to
   `main` and every PR, downloadable from the run's *Artifacts* for 14 days.
 - `docker.yml`: test, then build images on every push and PR. Pushes to `main` publish `edge`; tags
-  publish `1.0.0`, `1.0`, `1` (not for `0.x`) and `latest`.
-- `release.yml`: create a GitHub Release with the same binaries and checksums. Tags like `v1.0.0-rc.1`
-  become pre-releases.
+  publish `v1.0.0`, `v1.0`, `v1` (not for `v0.x`) and `latest`.
+- `release.yml`: create a GitHub Release with the same binaries, named with the tag
+  (`blocky-dashboard-v1.0.0-linux-amd64`), and checksums. Tags like `v1.0.0-rc.1` become
+  pre-releases.
 - `helm.yml`: lint the chart, and on tags publish it to `oci://ghcr.io/<owner>/charts` (and Docker
-  Hub) and attach it to the release.
+  Hub) and attach it to the release. The chart version has no `v` (`1.0.0`), because Helm ignores
+  `v`-prefixed chart versions unless asked for exactly; its `appVersion` and default image tag
+  keep it (`v1.0.0`).
 
 GHCR works with no setup, though new packages start private. Docker Hub is optional; configure it
 under **Settings → Secrets and variables → Actions**:

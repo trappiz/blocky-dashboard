@@ -3,9 +3,10 @@ name: blocky-dashboard
 description: Web dashboard for one or more Blocky DNS servers
 type: application
 # version and appVersion are replaced from the git tag when the chart is
-# published (see .github/workflows/helm.yml).
+# published (see .github/workflows/helm.yml): tag v1.2.3 gives version 1.2.3
+# and appVersion v1.2.3, which is also the default image tag.
 version: 0.1.0
-appVersion: "0.1.0"
+appVersion: "v0.1.0"
 keywords:
   - blocky
   - dns

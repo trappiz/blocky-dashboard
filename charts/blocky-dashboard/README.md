@@ -21,8 +21,8 @@ Release. `image.repository` and the default tag point at the image of the same
 release (the Docker Hub image when there is one, otherwise GHCR):
 
 ```bash
-helm install blocky-dashboard oci://ghcr.io/<owner>/charts/blocky-dashboard-chart --version <version> -f my-values.yaml
-helm install blocky-dashboard oci://registry-1.docker.io/<account>/blocky-dashboard-chart --version <version> -f my-values.yaml
+helm install blocky-dashboard oci://ghcr.io/<owner>/charts/blocky-dashboard-chart --version <version without v> -f my-values.yaml
+helm install blocky-dashboard oci://registry-1.docker.io/<account>/blocky-dashboard-chart --version <version without v> -f my-values.yaml
 ```
 
 The chart is named `<image name>-chart` unless the `CHART_NAME` repository
@@ -141,7 +141,7 @@ See [`values.yaml`](values.yaml) for every option with comments;
 | Value | Default | |
 | --- | --- | --- |
 | `image.repository` | set when published | Required when installing from source |
-| `image.tag` | chart `appVersion` | |
+| `image.tag` | chart `appVersion` (`v1.2.3`) | |
 | `image.digest` | `""` | Pins the image; overrides `tag` |
 | `config.*` | | App config, see `config.example.json` |
 | `secrets.existingSecret` | `""` | Secret with the keys above |
