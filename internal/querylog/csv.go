@@ -71,7 +71,7 @@ func (r *Reader) Read(needle, client, rtype string, limit int) ([]Entry, error) 
 	}
 	f := filter{needle: strings.ToLower(strings.TrimSpace(needle)), client: strings.TrimSpace(client), rtype: strings.TrimSpace(rtype)}
 
-	var out []Entry
+	out := []Entry{} // encode as [] rather than null when nothing matches
 	now := time.Now()
 	for i := 0; i < days && len(out) < limit; i++ {
 		files, err := filesForDay(r.cfg.Target, now.AddDate(0, 0, -i))

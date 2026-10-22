@@ -420,8 +420,9 @@ async function loadLogs() {
   try {
     const d = await api('api/query-log?' + params);
     if (seq !== logSeq) return;
-    $('logStatus').textContent = d.entries.length === 200 ? 'Newest 200 matches' : `${d.entries.length} matches`;
-    renderLogs(d.entries);
+    const rows = d.entries || [];
+    $('logStatus').textContent = rows.length === 200 ? 'Newest 200 matches' : `${rows.length} matches`;
+    renderLogs(rows);
   } catch (e) {
     if (seq !== logSeq) return;
     $('logStatus').textContent = '';

@@ -66,3 +66,14 @@ func TestReadCSVWithHeader(t *testing.T) {
 		t.Fatalf("header csv parsed wrong: %+v", got)
 	}
 }
+
+func TestReadNoMatchesIsEmptyNotNil(t *testing.T) {
+	r := New(config.QueryLogConfig{Type: "csv", Target: t.TempDir(), Days: 1})
+	got, err := r.Read("", "", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || len(got) != 0 {
+		t.Fatalf("want empty non-nil slice (JSON []), got %#v", got)
+	}
+}
