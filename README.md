@@ -1,32 +1,98 @@
 # Blocky Dashboard
 
-A self-contained, single-binary dashboard for an existing [Blocky](https://github.com/0xERR0R/blocky) DNS server.
+A web dashboard for one or more [Blocky](https://github.com/0xERR0R/blocky) DNS servers, shipped as a
+single Go binary with the UI embedded.
 
-The project takes inspiration from [BlockyUI](https://github.com/GabeDuarteM/blocky), but is deliberately designed around a Go server with an embedded frontend.
+- Blocking status, timed pause and enable/disable for all instances at once
+- Query stats for the last 24 hours: chart, outcome and query-type breakdown, top domains, top
+  blocked domains and top clients
+- DNS query tester, cache flush and list refresh
+- Optional search in Blocky's `csv` / `csv-client` query logs
+- Optional Basic Auth or a trusted reverse-proxy header
 
-## What is included
+## Blocky requirements
 
-- Single-page dashboard: everything on one screen, no navigation
-- Multiple Blocky instances: a summary card per instance, details for the selected one, and blocking/maintenance actions sent to all instances at once
-- Blocking status and timed pause (with live countdown) always visible in the header
-- Summary cards, queries-over-time chart, outcome and query-type breakdown using Blocky's `/api/stats`
-- Top domains, top blocked domains and top clients — click one to filter the query log
-- DNS query tester with result/reason/response-code presentation
-- Cache flush and list refresh (with confirmation)
-- Optional query-log reader for Blocky's `csv`/`csv-client` file logs, with search-as-you-type and client/outcome filters
-- Light and dark theme following the system setting
-- HTTP Basic Authentication or trusted reverse-proxy header token
-- Custom Blocky request headers / bearer token
-- Responsive UI
-- systemd unit
-- Linux amd64/arm64 release workflow
-- Everything embedded into one executable
+The dashboard talks to Blocky's HTTP API. In Blocky's config, enable the HTTP listener and statistics
+(without `statistics`, everything except the stats works):
 
-Blocky's statistics API provides a rolling 24-hour window, hourly data, top domains/blocked domains/clients, list counts, and cache entries. The dashboard consumes that directly rather than requiring Prometheus.
+```yaml
+ports:
+  http: 4000
+statistics:
+  enable: true
+```
 
-## Multiple instances
+Keep that port private; only the dashboard needs to reach it.
 
-List several Blocky servers under `instances` instead of using the top-level `blocky`/`queryLog` blocks:
+## Run
+
+```bash
+./blocky-dashboard --blocky http://127.0.0.1:4000          # one Blocky, no config file
+./blocky-dashboard --config /etc/blocky-dashboard/config.json
+```
+
+The default listen address is `127.0.0.1:3001`. Flags can also be set as environment variables:
+
+| Flag | Environment variable |
+| --- | --- |
+| `--config` | `BLOCKY_DASHBOARD_CONFIG` |
+| `--listen` | `BLOCKY_DASHBOARD_LISTEN` |
+| `--blocky` | `BLOCKY_DASHBOARD_BLOCKY_URL` (overrides the config and uses this single instance) |
+
+`GET /healthz` answers without auth and outside `ui.basePath`; `--healthcheck` probes it.
+
+### Docker
+
+Images for `linux/amd64` and `linux/arm64` are published to `ghcr.io/<owner>/<repository>` (and Docker Hub,
+if configured). The image is distroless, runs as uid 65532 and listens on `:3001`.
+
+```bash
+docker run -p 3001:3001 -e BLOCKY_DASHBOARD_BLOCKY_URL=http://10.0.0.53:4000 ghcr.io/<owner>/<repository>
+
+docker run -p 3001:3001 \
+  -v ./config.json:/etc/blocky-dashboard/config.json:ro \
+  -e BLOCKY_DASHBOARD_CONFIG=/etc/blocky-dashboard/config.json \
+  ghcr.io/<owner>/<repository>
+```
+
+`make docker` builds `blocky-dashboard:dev` locally.
+
+### Kubernetes
+
+Use the Helm chart in [`charts/blocky-dashboard`](charts/blocky-dashboard/README.md):
+
+```bash
+helm install blocky-dashboard oci://ghcr.io/<owner>/charts/blocky-dashboard-chart --version <version> -f my-values.yaml
+```
+
+### systemd
+
+```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin blocky-dashboard
+sudo install -d -o blocky-dashboard -g blocky-dashboard /var/lib/blocky-dashboard
+sudo install -Dm755 blocky-dashboard /usr/local/bin/blocky-dashboard
+sudo install -Dm644 blocky-dashboard.service /etc/systemd/system/blocky-dashboard.service
+sudo install -Dm640 -g blocky-dashboard config.example.json /etc/blocky-dashboard/config.json
+sudo systemctl daemon-reload
+sudo systemctl enable --now blocky-dashboard
+```
+
+## Configuration
+
+Start from [`config.example.json`](config.example.json). Main settings:
+
+| Key | Meaning |
+| --- | --- |
+| `listen` | listen address |
+| `blocky.url`, `blocky.token`, `blocky.headers` | Blocky API URL, optional bearer token and extra headers |
+| `instances` | several Blocky servers (replaces `blocky` and `queryLog`) |
+| `ui.title`, `ui.instance` | page title, name of the single instance |
+| `ui.basePath` | serve under a sub-path, e.g. `/dns` |
+| `ui.autoRefreshSeconds` | refresh interval |
+| `auth` | Basic Auth or proxy header token |
+| `queryLog` | query-log directory |
+
+### Multiple instances
 
 ```json
 "instances": [
@@ -36,97 +102,44 @@ List several Blocky servers under `instances` instead of using the top-level `bl
 ]
 ```
 
-- The top of the page shows one card per instance: reachability, blocking state, queries, blocked share, cache hit rate and response time, plus a combined total.
-- Click a card (or use the tabs) to pick the instance for the details below: chart, outcome breakdown, top lists, domain tester and query log. The choice is kept in the URL (`#dns2`), so it can be bookmarked.
-- The header blocking menu and the maintenance menu act on **all** instances; each card's own blocking pill acts on just that instance. Partial failures are reported per instance.
-- Query logs are read from the dashboard's local filesystem, so each instance's `queryLog` only works if its log directory is reachable from the dashboard host (local, or a mounted share). Instances without one simply have no query-log section.
-- If your instances share Redis, Blocky already syncs blocking state between them; sending the action to all instances is harmless.
+The page shows one card per instance; click one to see its details (the choice is kept in the URL,
+e.g. `#dns2`). The blocking and maintenance menus in the header act on all instances, the pill on a
+card on just that one.
 
-`--blocky <url>` on the command line overrides the config and runs against that single instance.
+### Query logs
 
-## Query logs
-
-Blocky can write query logs to CSV, SQLite, MySQL/MariaDB, PostgreSQL/Timescale, and other targets. This dashboard currently reads Blocky's **file logs** (`csv` and `csv-client`) directly because that keeps the dashboard's binary and operational footprint small. It reads Blocky's tab-separated `YYYY-MM-DD_*.log` files, and also accepts `.csv` files with a header row. `days` is how many daily files to search, newest first.
-
-Example Blocky configuration:
-
-```yaml
-queryLog:
-  type: csv
-  target: /var/lib/blocky/logs
-  logRetentionDays: 7
-```
-
-Then configure:
+The dashboard reads Blocky's file logs (`queryLog.type: csv` or `csv-client`) from a local directory,
+so the logs must be on the same host or a mounted share, readable by the dashboard. `days` is how many
+daily files to search.
 
 ```json
-"queryLog": {
-  "type": "csv",
-  "target": "/var/lib/blocky/logs",
-  "days": 2
-}
+"queryLog": { "type": "csv", "target": "/var/lib/blocky/logs", "days": 2 }
 ```
 
-The dashboard's service user needs read access to that directory.
+Other Blocky query-log targets (databases) are not supported. Query logs show your network's
+activity, so enable auth before exposing the dashboard.
 
-Query logs contain sensitive network activity. Restrict filesystem access and enable authentication before exposing the dashboard beyond a trusted network.
-
-## Authentication
-
-Enable Basic Auth:
+### Authentication
 
 ```json
-"auth": {
-  "enabled": true,
-  "username": "admin",
-  "password": "use-a-long-random-password"
-}
+"auth": { "enabled": true, "username": "admin", "password": "use-a-long-random-password" }
 ```
 
-Secrets can also come from environment variables, which override the file:
-`BLOCKY_DASHBOARD_AUTH_PASSWORD`, `BLOCKY_DASHBOARD_AUTH_HEADER_TOKEN`, `BLOCKY_DASHBOARD_BLOCKY_TOKEN`
-(single instance) and `BLOCKY_DASHBOARD_INSTANCE_<NAME>_TOKEN` per instance, where `<NAME>` is the
-instance name upper-cased with other characters replaced by `_` (`Office DNS` → `OFFICE_DNS`).
+Alternatively, set `auth.headerToken` and have a trusted reverse proxy send it as
+`X-Blocky-Dashboard-Token`. Only use this when the dashboard isn't reachable except through that proxy.
 
-Or have a trusted reverse proxy inject:
+The dashboard refuses to start with auth enabled and the example password `change-me`.
 
-```text
-X-Blocky-Dashboard-Token: ...
-```
+Secrets can come from environment variables instead of the file:
 
-and configure `headerToken`. Do not expose that header-token mode directly to an untrusted network.
+| Variable | Overrides |
+| --- | --- |
+| `BLOCKY_DASHBOARD_AUTH_PASSWORD` | `auth.password` |
+| `BLOCKY_DASHBOARD_AUTH_HEADER_TOKEN` | `auth.headerToken` |
+| `BLOCKY_DASHBOARD_BLOCKY_TOKEN` | `blocky.token` |
+| `BLOCKY_DASHBOARD_INSTANCE_<NAME>_TOKEN` | the token of instance `<NAME>`, upper-cased with other characters as `_` (`Office DNS` → `OFFICE_DNS`) |
 
-The dashboard refuses to start with auth enabled and the example password. State-changing endpoints (blocking, cache flush, list refresh) only accept `POST` and reject cross-site requests.
-
-## Build
-
-Requires Go 1.25+.
-
-```bash
-make build   # or: go build -trimpath -ldflags="-s -w" -o blocky-dashboard ./cmd/blocky-dashboard
-make test
-```
-
-The frontend is embedded using `go:embed`.
-
-## Run
-
-```bash
-cp config.example.json /etc/blocky-dashboard.json
-./blocky-dashboard --config /etc/blocky-dashboard.json
-```
-
-Or:
-
-```bash
-./blocky-dashboard \
-  --listen 127.0.0.1:3001 \
-  --blocky http://127.0.0.1:4000
-```
-
-## Reverse proxy
-
-Example Caddy:
+### Reverse proxy
 
 ```text
 dns.example.com {
@@ -134,122 +147,41 @@ dns.example.com {
 }
 ```
 
-To serve the dashboard under a sub-path (for example `https://example.com/dns/`), set `ui.basePath` to `/dns/` and proxy that path without stripping it.
+For a sub-path such as `https://example.com/dns/`, set `ui.basePath` to `/dns` and proxy that path
+without stripping it.
 
-Keep Blocky's API listener private if possible and expose only the dashboard through your proxy.
+## Build
 
-## Docker
-
-The image is a two-stage build: Go compiles a static binary, which is copied into
-[distroless `static-debian12:nonroot`](https://github.com/GoogleContainerTools/distroless)
-(no shell or package manager, runs as uid 65532). It is published for `linux/amd64` and `linux/arm64`.
+Requires Go 1.25+.
 
 ```bash
-make docker                       # builds blocky-dashboard:dev locally
-
-# one Blocky, no config file
-docker run -p 3001:3001 -e BLOCKY_DASHBOARD_BLOCKY_URL=http://10.0.0.53:4000 blocky-dashboard:dev
-
-# with a config file (instances, auth, query logs, ...)
-docker run -p 3001:3001 \
-  -v ./config.json:/etc/blocky-dashboard/config.json:ro \
-  -e BLOCKY_DASHBOARD_CONFIG=/etc/blocky-dashboard/config.json \
-  blocky-dashboard:dev
+make build
+make test
 ```
 
-The container listens on `:3001`. Settings can come from flags or environment variables:
+## Releases and CI
 
-| Flag | Environment variable |
-| --- | --- |
-| `--config` | `BLOCKY_DASHBOARD_CONFIG` |
-| `--listen` | `BLOCKY_DASHBOARD_LISTEN` (image default `:3001`) |
-| `--blocky` | `BLOCKY_DASHBOARD_BLOCKY_URL` |
-
-`/healthz` answers without authentication and outside `ui.basePath`, so it works for
-container and Kubernetes probes. The image's `HEALTHCHECK` runs `blocky-dashboard -healthcheck`.
-Mount query-log directories read-only if you use them; the dashboard never writes to disk,
-so it runs fine with a read-only root filesystem.
-
-### Publishing with GitHub Actions
-
-`.github/workflows/docker.yml` tests the code, then builds the image on every push and pull request.
-Pushes to `main` publish the tags `edge` and `sha-<commit>`; version tags publish `v1.2.3` as
-`1.2.3`, `1.2`, `1` and `latest`. Pull requests only build. Images go to:
-
-- **GitHub Container Registry**, always: `ghcr.io/<owner>/<repository>`, shown under this
-  repository's *Packages*. It uses the workflow's built-in `GITHUB_TOKEN`, so nothing needs setting up.
-  New packages start private; make it public under the package's settings if you want anonymous pulls.
-- **Docker Hub**, optional: enabled by setting the variables below.
-
-Nothing is hard-coded. Image names are derived in one place, `.github/actions/image-names`, from
-the repository name and these settings under **Settings → Secrets and variables → Actions**:
-
-| Name | Kind | Value |
-| --- | --- | --- |
-| `DOCKERHUB_USERNAME` | variable, optional | Docker Hub account or organisation; leave unset for GHCR only |
-| `DOCKERHUB_TOKEN` | secret | Docker Hub [access token](https://app.docker.com/settings/personal-access-tokens) with Read & Write scope |
-| `IMAGE_NAME` | variable, optional | Docker Hub image name; defaults to `<DOCKERHUB_USERNAME>/<repository name>` |
-
-### Releases
-
-Push a version tag to cut a release:
+Push a version tag to release:
 
 ```bash
 git tag v1.0.0 && git push origin v1.0.0
 ```
 
-`.github/workflows/release.yml` creates a GitHub Release with Linux binaries, `checksums.txt`,
-generated notes and the `docker pull` commands for both registries; `helm.yml` attaches the
-packaged Helm chart to the same release. Tags with a suffix (`v1.0.0-rc.1`) become pre-releases.
+The GitHub Actions workflows then:
 
-Dependabot (`.github/dependabot.yml`) opens weekly PRs to keep the base images and actions current.
+- `docker.yml`: test, then build images on every push and PR. Pushes to `main` publish `edge`; tags
+  publish `1.0.0`, `1.0`, `1` (not for `0.x`) and `latest`.
+- `release.yml`: create a GitHub Release with Linux binaries and checksums. Tags like `v1.0.0-rc.1`
+  become pre-releases.
+- `helm.yml`: lint the chart, and on tags publish it to `oci://ghcr.io/<owner>/charts` (and Docker
+  Hub) and attach it to the release.
 
-## Kubernetes (Helm)
+GHCR works with no setup, though new packages start private. Docker Hub is optional; configure it
+under **Settings → Secrets and variables → Actions**:
 
-A Helm chart lives in [`charts/blocky-dashboard`](charts/blocky-dashboard/README.md). It renders
-the config (single or multiple instances) into a ConfigMap, keeps the auth password and Blocky
-tokens in a Secret (or an existing one), runs the pod non-root with a read-only root filesystem,
-and can add an Ingress or HTTPRoute (honouring `ui.basePath`), a NetworkPolicy and read-only
-query-log volumes.
-
-```bash
-helm install blocky-dashboard oci://ghcr.io/<owner>/charts/blocky-dashboard-chart --version <version> -f my-values.yaml
-```
-
-`.github/workflows/helm.yml` lints and renders the chart on pull requests. For version tags it
-publishes it to `oci://ghcr.io/<owner>/charts`, to `oci://registry-1.docker.io/<DOCKERHUB_USERNAME>`
-when Docker Hub is configured (skipped with a warning otherwise), and attaches the `.tgz` to the
-GitHub Release. `image.repository` and the default tag point at the image of the same release: the
-Docker Hub image when configured, otherwise `ghcr.io/<owner>/<repository>`. It reuses
-`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` and `IMAGE_NAME`; the optional variable `CHART_NAME`
-(default `<image name>-chart`) names the chart repository, which on Docker Hub has to differ from the
-image repository.
-
-## systemd
-
-Create the service user, install the binary/config, then:
-
-```bash
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin blocky-dashboard
-sudo install -d -o blocky-dashboard -g blocky-dashboard /var/lib/blocky-dashboard
-sudo install -Dm755 blocky-dashboard /usr/local/bin/blocky-dashboard
-sudo install -Dm644 blocky-dashboard.service /etc/systemd/system/blocky-dashboard.service
-sudo install -Dm640 config.example.json /etc/blocky-dashboard/config.json
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now blocky-dashboard
-```
-
-The included unit applies a restrictive systemd sandbox.
-
-## Roadmap
-
-- Native SQLite query-log reader matching Blocky's schema
-- PostgreSQL/MySQL query-log adapters
-- query-log charts for arbitrary time ranges
-- query-log pagination and richer filters
-- CSRF protection for state-changing operations when cookie auth is added
-- configurable groups for timed blocking
-- Prometheus metrics for the dashboard itself
-- optional Blivit integration
-- signed multi-platform releases
+| Name | Kind | Value |
+| --- | --- | --- |
+| `DOCKERHUB_USERNAME` | variable | Docker Hub account or organisation |
+| `DOCKERHUB_TOKEN` | secret | Docker Hub access token with Read & Write scope |
+| `IMAGE_NAME` | variable, optional | Docker Hub image name, default `<DOCKERHUB_USERNAME>/<repository>` |
+| `CHART_NAME` | variable, optional | chart name, default `<image name>-chart` |
