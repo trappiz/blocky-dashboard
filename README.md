@@ -172,7 +172,7 @@ The GitHub Actions workflows then:
 - `build.yml`: build binaries for Linux, macOS and Windows (amd64 and arm64) on every push to
   `main` and every PR, downloadable from the run's *Artifacts* for 14 days.
 - `docker.yml`: test, then build images on every push and PR. Pushes to `main` publish `edge`; tags
-  publish `v1.0.0`, `v1.0`, `v1` (not for `v0.x`) and `latest`.
+  publish `v1.0.0` and `latest`.
 - `release.yml`: create a GitHub Release with the same binaries, named with the tag
   (`blocky-dashboard-v1.0.0-linux-amd64`), and checksums. Tags like `v1.0.0-rc.1` become
   pre-releases.
