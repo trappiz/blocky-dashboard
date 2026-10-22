@@ -38,7 +38,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           EXT: ${{ matrix.ext }}
           CGO_ENABLED: "0"
-        run: go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME#v}" -o "blocky-dashboard-${GOOS}-${GOARCH}${EXT}" ./cmd/blocky-dashboard
+        run: go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "blocky-dashboard-${GITHUB_REF_NAME}-${GOOS}-${GOARCH}${EXT}" ./cmd/blocky-dashboard
       - uses: actions/upload-artifact@v4
         with:
           name: blocky-dashboard-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -74,25 +74,27 @@ jobs:
           CHART_DOCKERHUB: ${{ steps.names.outputs.chart-dockerhub }}
         run: |
           cd dist && sha256sum blocky-dashboard-* > checksums.txt && cd ..
-          version="${GITHUB_REF_NAME#v}"
+          tag="$GITHUB_REF_NAME"
+          # Helm only resolves chart versions without the v prefix.
+          chart_version="${GITHUB_REF_NAME#v}"
           {
             echo "## Container image"
             echo
             echo "Multi-arch (linux/amd64, linux/arm64), distroless, non-root."
             echo
             echo '```bash'
-            echo "docker pull $GHCR:$version"
-            [ -n "$DOCKERHUB" ] && echo "docker pull $DOCKERHUB:$version"
+            echo "docker pull $GHCR:$tag"
+            [ -n "$DOCKERHUB" ] && echo "docker pull $DOCKERHUB:$tag"
             echo '```'
             echo
             echo "## Helm chart"
             echo
             echo '```bash'
-            echo "helm install blocky-dashboard $CHART_GHCR/$CHART --version $version -f values.yaml"
-            [ -n "$CHART_DOCKERHUB" ] && echo "helm install blocky-dashboard $CHART_DOCKERHUB/$CHART --version $version -f values.yaml"
+            echo "helm install blocky-dashboard $CHART_GHCR/$CHART --version $chart_version -f values.yaml"
+            [ -n "$CHART_DOCKERHUB" ] && echo "helm install blocky-dashboard $CHART_DOCKERHUB/$CHART --version $chart_version -f values.yaml"
             echo '```'
             echo
-            echo "The packaged chart (\`$CHART-$version.tgz\`) is also attached below."
+            echo "The packaged chart (\`$CHART-$chart_version.tgz\`) is also attached below."
             echo
             echo "## Binaries"
             echo

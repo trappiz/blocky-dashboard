@@ -1,7 +1,7 @@
 name: docker
 
 # Builds the container image on every push and pull request. Pushes to main
-# (tags "edge", "sha-<commit>") and version tags (v1.2.3 → 1.2.3, 1.2, 1,
+# (tags "edge", "sha-<commit>") and version tags (v1.2.3 → v1.2.3, v1.2, v1,
 # latest) are published to:
 #   - GitHub Container Registry: ghcr.io/<owner>/<repo>, linked to this
 #     repository. Always on; uses the built-in GITHUB_TOKEN.
@@ -85,9 +85,9 @@ jobs:
         with:
           images: ${{ steps.names.outputs.images }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
             type=edge,branch=main
             type=sha,format=short
             type=ref,event=pr

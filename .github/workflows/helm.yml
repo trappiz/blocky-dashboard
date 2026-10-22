@@ -1,7 +1,8 @@
 name: helm
 
 # Lints and renders the Helm chart on pull requests and pushes. For version
-# tags (v1.2.3) it packages the chart as version 1.2.3, pointing at the image
+# tags (v1.2.3) it packages the chart as version 1.2.3 (Helm only resolves
+# versions without the v) with appVersion v1.2.3, so it points at the image
 # docker.yml pushes for the same tag, and publishes it to:
 #   - GHCR:       oci://ghcr.io/<owner>/charts/<chart name>  (always)
 #   - Docker Hub: oci://registry-1.docker.io/<DOCKERHUB_USERNAME>/<chart name>
@@ -106,6 +107,7 @@ jobs:
           fi
           {
             echo "version=$version"
+            echo "tag=$TAG"
             echo "image=$IMAGE"
             echo "chart=$CHART"
             echo "dockerhub=$dockerhub"
@@ -114,13 +116,14 @@ jobs:
       - name: Package
         env:
           VERSION: ${{ steps.names.outputs.version }}
+          TAG: ${{ steps.names.outputs.tag }}
           IMAGE: ${{ steps.names.outputs.image }}
           CHART: ${{ steps.names.outputs.chart }}
         run: |
           yq -i '.name = strenv(CHART)' "$CHART_DIR/Chart.yaml"
           yq -i '.image.repository = strenv(IMAGE)' "$CHART_DIR/values.yaml"
           helm lint --strict "$CHART_DIR"
-          helm package "$CHART_DIR" --version "$VERSION" --app-version "$VERSION" --destination dist
+          helm package "$CHART_DIR" --version "$VERSION" --app-version "$TAG" --destination dist
 
       - name: Push to GHCR
         env:
