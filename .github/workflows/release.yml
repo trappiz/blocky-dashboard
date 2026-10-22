@@ -101,7 +101,7 @@ jobs:
             echo "Static binaries for Linux, macOS and Windows (amd64 and arm64) are attached below; verify with \`sha256sum -c checksums.txt\`."
           } > notes.md
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           body_path: notes.md
           generate_release_notes: true
