@@ -49,9 +49,39 @@ type AuthConfig struct {
 }
 
 type QueryLogConfig struct {
-	Type   string `json:"type"`   // csv for Blocky's csv/csv-client file logs
-	Target string `json:"target"` // log directory
-	Days   int    `json:"days"`   // number of daily files to search, including today
+	// Enabled switches the query log off without removing its settings.
+	// Unset means on when type and target are set.
+	Enabled *bool  `json:"enabled,omitempty"`
+	Type    string `json:"type"`   // same as Blocky's queryLog.type: csv, csv-client, mysql, postgresql or timescale
+	Target  string `json:"target"` // log directory for csv, connection string (DSN) for a database
+	Days    int    `json:"days"`   // days to search, including today
+	// Hostname limits a database shared by several Blocky servers to the
+	// entries written by this one: an SQL LIKE pattern on its hostname column.
+	Hostname string `json:"hostname"`
+}
+
+// IsEnabled reports whether the query log is switched on (it may still be
+// unconfigured).
+func (q QueryLogConfig) IsEnabled() bool { return q.Enabled == nil || *q.Enabled }
+
+// KnownQueryLogType reports whether the dashboard can read this Blocky
+// query log type.
+func KnownQueryLogType(t string) bool {
+	switch strings.ToLower(t) {
+	case "csv", "csv-client":
+		return true
+	}
+	return IsDatabaseQueryLog(t)
+}
+
+// IsDatabaseQueryLog reports whether the type stores entries in a database
+// reached over the network, rather than in local files.
+func IsDatabaseQueryLog(t string) bool {
+	switch strings.ToLower(t) {
+	case "mysql", "postgresql", "postgres", "timescale":
+		return true
+	}
+	return false
 }
 
 func Load(path string) (Config, error) {
@@ -90,6 +120,11 @@ func (c Config) Validate() error {
 	if b := c.UI.BasePath; b != "" && !strings.HasPrefix(b, "/") {
 		return errors.New("ui.basePath must start with /")
 	}
+	for _, in := range c.ResolvedInstances() {
+		if q := in.QueryLog; q.IsEnabled() && q.Type != "" && !KnownQueryLogType(q.Type) {
+			return fmt.Errorf("instance %q: unsupported queryLog.type %q (use csv, csv-client, mysql, postgresql or timescale)", in.Name, q.Type)
+		}
+	}
 	seen := map[string]string{}
 	for i, in := range c.Instances {
 		if strings.TrimSpace(in.Name) == "" {
@@ -126,11 +161,14 @@ const (
 	EnvAuthPassword    = "BLOCKY_DASHBOARD_AUTH_PASSWORD"
 	EnvAuthHeaderToken = "BLOCKY_DASHBOARD_AUTH_HEADER_TOKEN"
 	EnvBlockyToken     = "BLOCKY_DASHBOARD_BLOCKY_TOKEN"
+	EnvQueryLogTarget  = "BLOCKY_DASHBOARD_QUERYLOG_TARGET"
 )
 
 // ApplyEnv overrides secrets with non-empty environment variables: the auth
-// password and header token, the single-instance Blocky token, and each
-// instance's token from InstanceTokenEnv(name).
+// password and header token, the single-instance Blocky token and query log
+// target, and each instance's token and query log target from
+// InstanceTokenEnv(name) and InstanceQueryLogTargetEnv(name). The query log
+// target is a secret when it is a database connection string.
 func (c *Config) ApplyEnv(getenv func(string) string) {
 	set := func(dst *string, key string) {
 		if v := getenv(key); v != "" {
@@ -140,15 +178,23 @@ func (c *Config) ApplyEnv(getenv func(string) string) {
 	set(&c.Auth.Password, EnvAuthPassword)
 	set(&c.Auth.HeaderToken, EnvAuthHeaderToken)
 	set(&c.Blocky.Token, EnvBlockyToken)
+	set(&c.QueryLog.Target, EnvQueryLogTarget)
 	for i := range c.Instances {
 		set(&c.Instances[i].Token, InstanceTokenEnv(c.Instances[i].Name))
+		set(&c.Instances[i].QueryLog.Target, InstanceQueryLogTargetEnv(c.Instances[i].Name))
 	}
 }
 
 // InstanceTokenEnv names the variable holding an instance's Blocky token:
 // "Home DNS" → BLOCKY_DASHBOARD_INSTANCE_HOME_DNS_TOKEN.
-func InstanceTokenEnv(name string) string {
-	return "BLOCKY_DASHBOARD_INSTANCE_" + strings.ToUpper(strings.ReplaceAll(Slug(name), "-", "_")) + "_TOKEN"
+func InstanceTokenEnv(name string) string { return instanceEnv(name, "TOKEN") }
+
+// InstanceQueryLogTargetEnv names the variable holding an instance's query
+// log target: "Home DNS" → BLOCKY_DASHBOARD_INSTANCE_HOME_DNS_QUERYLOG_TARGET.
+func InstanceQueryLogTargetEnv(name string) string { return instanceEnv(name, "QUERYLOG_TARGET") }
+
+func instanceEnv(name, suffix string) string {
+	return "BLOCKY_DASHBOARD_INSTANCE_" + strings.ToUpper(strings.ReplaceAll(Slug(name), "-", "_")) + "_" + suffix
 }
 
 var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)

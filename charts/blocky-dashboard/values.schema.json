@@ -15,9 +15,11 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "type": { "type": "string", "enum": ["", "csv"] },
+        "enabled": { "type": "boolean" },
+        "type": { "type": "string", "enum": ["", "csv", "csv-client", "mysql", "postgresql", "postgres", "timescale"] },
         "target": { "type": "string" },
-        "days": { "type": "integer", "minimum": 1 }
+        "days": { "type": "integer", "minimum": 1 },
+        "hostname": { "type": "string" }
       }
     },
     "stringMap": { "type": "object", "additionalProperties": { "type": "string" } },

@@ -44,11 +44,20 @@ config:
     token: ""
     headers: {}
   queryLog:
-    # csv for Blocky's csv/csv-client file logs; empty disables query search.
+    # Set to false to hide the query log without removing its settings.
+    enabled: true
+    # Blocky's queryLog.type: csv or csv-client (log files, mount them with
+    # queryLogVolumes), or mysql, postgresql or timescale (read over the
+    # network). Empty disables query search.
     type: ""
-    # Directory inside the container; mount it with queryLogVolumes.
+    # csv: directory inside the container. Database: the same connection
+    # string (DSN) as Blocky's queryLog.target; it is moved into the Secret.
+    # Prefer a read-only database user.
     target: ""
     days: 1
+    # Database shared by several Blocky servers: SQL LIKE pattern on the
+    # hostname of the Blocky that wrote the entry, e.g. blocky-primary-%.
+    hostname: ""
 
   # Several Blocky instances. Each entry: name, url, token, headers, queryLog.
   instances: []
@@ -59,6 +68,12 @@ config:
   #      type: csv
   #      target: /logs/primary
   #      days: 2
+  #  - name: secondary
+  #    url: http://blocky-secondary.blocky.svc:4000
+  #    queryLog:
+  #      type: postgresql
+  #      target: postgres://dashboard:password@postgres.blocky.svc:5432/blocky
+  #      hostname: blocky-secondary-%
 
 secrets:
   # Use an existing Secret instead of the values above. Its keys are the
@@ -66,8 +81,10 @@ secrets:
   #   BLOCKY_DASHBOARD_AUTH_PASSWORD
   #   BLOCKY_DASHBOARD_AUTH_HEADER_TOKEN
   #   BLOCKY_DASHBOARD_BLOCKY_TOKEN              (single instance)
+  #   BLOCKY_DASHBOARD_QUERYLOG_TARGET           (single instance, database DSN)
   #   BLOCKY_DASHBOARD_INSTANCE_<NAME>_TOKEN     (per instance; name upper-cased,
   #                                               non-alphanumerics → _)
+  #   BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TARGET
   existingSecret: ""
 
 # Read-only volumes holding Blocky's csv query logs. Point

@@ -18,6 +18,7 @@
     "headerToken": ""
   },
   "queryLog": {
+    "enabled": true,
     "type": "",
     "target": "/var/lib/blocky/logs",
     "days": 2

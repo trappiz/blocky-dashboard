@@ -64,18 +64,39 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "BLOCKY_DASHBOARD_INSTANCE_%s_TOKEN" (default "instance" $s | upper | replace "-" "_") }}
 {{- end }}
 
+{{/* Environment variable holding an instance's query log target; mirrors config.InstanceQueryLogTargetEnv. */}}
+{{- define "blocky-dashboard.instanceQueryLogTargetEnv" -}}
+{{- include "blocky-dashboard.instanceTokenEnv" . | trimSuffix "_TOKEN" }}_QUERYLOG_TARGET
+{{- end }}
+
+{{/* Whether a queryLog block points at a database; its target (DSN) is then a secret. */}}
+{{- define "blocky-dashboard.queryLogIsDatabase" -}}
+{{- if has (lower (default "" .type)) (list "mysql" "postgresql" "postgres" "timescale") }}true{{ end }}
+{{- end }}
+
+{{/* queryLog block without a database connection string. */}}
+{{- define "blocky-dashboard.queryLogJson" -}}
+{{- if include "blocky-dashboard.queryLogIsDatabase" . }}
+{{- toJson (omit . "target") }}
+{{- else }}
+{{- toJson . }}
+{{- end }}
+{{- end }}
+
 {{/* config.json without secrets. */}}
 {{- define "blocky-dashboard.configJson" -}}
 {{- $c := .Values.config }}
 {{- $instances := list }}
 {{- range $c.instances }}
-{{- $instances = append $instances (omit . "token") }}
+{{- $i := omit . "token" }}
+{{- with .queryLog }}{{ $_ := set $i "queryLog" (include "blocky-dashboard.queryLogJson" . | fromJson) }}{{ end }}
+{{- $instances = append $instances $i }}
 {{- end }}
 {{- $out := dict
   "ui" $c.ui
   "auth" (omit $c.auth "password" "headerToken")
   "blocky" (omit $c.blocky "token")
-  "queryLog" $c.queryLog
+  "queryLog" (include "blocky-dashboard.queryLogJson" (default dict $c.queryLog) | fromJson)
   "instances" $instances }}
 {{- toPrettyJson $out }}
 {{- end }}
@@ -87,8 +108,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- with $c.auth.password }}{{ $_ := set $d "BLOCKY_DASHBOARD_AUTH_PASSWORD" . }}{{ end }}
 {{- with $c.auth.headerToken }}{{ $_ := set $d "BLOCKY_DASHBOARD_AUTH_HEADER_TOKEN" . }}{{ end }}
 {{- with $c.blocky.token }}{{ $_ := set $d "BLOCKY_DASHBOARD_BLOCKY_TOKEN" . }}{{ end }}
+{{- with $c.queryLog }}
+{{- if and .target (include "blocky-dashboard.queryLogIsDatabase" .) }}{{ $_ := set $d "BLOCKY_DASHBOARD_QUERYLOG_TARGET" .target }}{{ end }}
+{{- end }}
 {{- range $c.instances }}
 {{- if .token }}{{ $_ := set $d (include "blocky-dashboard.instanceTokenEnv" .name) .token }}{{ end }}
+{{- $name := .name }}
+{{- with .queryLog }}
+{{- if and .target (include "blocky-dashboard.queryLogIsDatabase" .) }}{{ $_ := set $d (include "blocky-dashboard.instanceQueryLogTargetEnv" $name) .target }}{{ end }}
+{{- end }}
 {{- end }}
 {{- toYaml $d }}
 {{- end }}

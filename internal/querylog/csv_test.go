@@ -1,6 +1,7 @@
 package querylog
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,7 +30,7 @@ func TestReadBlockyFormatNewestFirst(t *testing.T) {
 
 	r := New(config.QueryLogConfig{Type: "csv", Target: dir, Days: 2})
 
-	got, err := r.Read("", "", "", 2)
+	got, err := r.Read(context.Background(), "", "", "", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,12 +41,12 @@ func TestReadBlockyFormatNewestFirst(t *testing.T) {
 		t.Fatalf("columns parsed wrong: %+v", got[0])
 	}
 
-	got, _ = r.Read("", "", "", 10)
+	got, _ = r.Read(context.Background(), "", "", "", 10)
 	if len(got) != 4 || got[3].Question != "old.example" {
 		t.Fatalf("want all four entries across days, got %d", len(got))
 	}
 
-	got, _ = r.Read("", "phone", "blocked", 10)
+	got, _ = r.Read(context.Background(), "", "phone", "blocked", 10)
 	if len(got) != 1 || got[0].Question != "ads.example" {
 		t.Fatalf("client/type filter failed: %+v", got)
 	}
@@ -58,7 +59,7 @@ func TestReadCSVWithHeader(t *testing.T) {
 		"time,client_ip,client_name,question,response_type,return_code,response_reason,duration_ms\n"+
 			today+" 08:00:00,10.0.0.9,tv,cdn.example,RESOLVED,NOERROR,RESOLVED (upstream),12\n")
 
-	got, err := New(config.QueryLogConfig{Type: "csv", Target: dir}).Read("cdn", "", "", 0)
+	got, err := New(config.QueryLogConfig{Type: "csv", Target: dir}).Read(context.Background(), "cdn", "", "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestReadCSVWithHeader(t *testing.T) {
 
 func TestReadNoMatchesIsEmptyNotNil(t *testing.T) {
 	r := New(config.QueryLogConfig{Type: "csv", Target: t.TempDir(), Days: 1})
-	got, err := r.Read("", "", "", 10)
+	got, err := r.Read(context.Background(), "", "", "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}

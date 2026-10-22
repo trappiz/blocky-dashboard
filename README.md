@@ -7,7 +7,8 @@ single Go binary with the UI embedded.
 - Query stats for the last 24 hours: chart, outcome and query-type breakdown, top domains, top
   blocked domains and top clients
 - DNS query tester, cache flush and list refresh
-- Optional search in Blocky's `csv` / `csv-client` query logs
+- Optional search in Blocky's query log: `csv` / `csv-client` files, or a MySQL, PostgreSQL or
+  TimescaleDB database
 - Optional Basic Auth or a trusted reverse-proxy header
 
 ## Blocky requirements
@@ -90,7 +91,7 @@ Start from [`config.example.json`](config.example.json). Main settings:
 | `ui.basePath` | serve under a sub-path, e.g. `/dns` |
 | `ui.autoRefreshSeconds` | refresh interval |
 | `auth` | Basic Auth or proxy header token |
-| `queryLog` | query-log directory |
+| `queryLog` | query-log files or database |
 
 ### Multiple instances
 
@@ -108,16 +109,31 @@ card on just that one.
 
 ### Query logs
 
-The dashboard reads Blocky's file logs (`queryLog.type: csv` or `csv-client`) from a local directory,
-so the logs must be on the same host or a mounted share, readable by the dashboard. `days` is how many
-daily files to search.
+The query log section appears for each instance whose `queryLog` is set up; `"enabled": false` hides
+it without removing the settings. `type` is the same as Blocky's `queryLog.type`, and `days` is how
+many days to search, including today.
+
+**Database** (`mysql`, `postgresql` or `timescale`): the dashboard connects with the same connection
+string Blocky uses as its `target`, so it can run anywhere that reaches the database. Use a
+read-only user, and pass the string through `BLOCKY_DASHBOARD_QUERYLOG_TARGET` (or
+`BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TARGET`) rather than the file, since it holds a
+password. When several Blocky servers share one database, `hostname` limits an instance to the
+entries its server wrote (an SQL `LIKE` pattern such as `blocky-primary-%`; Blocky records its
+hostname, which in Kubernetes is the pod name).
+
+```json
+"queryLog": { "type": "postgresql", "days": 7, "hostname": "blocky-primary-%" }
+```
+
+**Files** (`csv` or `csv-client`): `target` is the log directory, which must be on the same host as
+the dashboard or on a mounted share.
 
 ```json
 "queryLog": { "type": "csv", "target": "/var/lib/blocky/logs", "days": 2 }
 ```
 
-Other Blocky query-log targets (databases) are not supported. Query logs show your network's
-activity, so enable auth before exposing the dashboard.
+`sqlite` isn't supported, since only Blocky's host can read the file. Query logs show your
+network's activity, so enable auth before exposing the dashboard.
 
 ### Authentication
 
@@ -137,7 +153,9 @@ Secrets can come from environment variables instead of the file:
 | `BLOCKY_DASHBOARD_AUTH_PASSWORD` | `auth.password` |
 | `BLOCKY_DASHBOARD_AUTH_HEADER_TOKEN` | `auth.headerToken` |
 | `BLOCKY_DASHBOARD_BLOCKY_TOKEN` | `blocky.token` |
+| `BLOCKY_DASHBOARD_QUERYLOG_TARGET` | `queryLog.target` |
 | `BLOCKY_DASHBOARD_INSTANCE_<NAME>_TOKEN` | the token of instance `<NAME>`, upper-cased with other characters as `_` (`Office DNS` → `OFFICE_DNS`) |
+| `BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TARGET` | the query log target of instance `<NAME>` |
 
 ### Reverse proxy
 

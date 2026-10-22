@@ -54,6 +54,30 @@ secrets:
 kubectl create secret generic blocky-dashboard --from-literal=BLOCKY_DASHBOARD_AUTH_PASSWORD='...'
 ```
 
+## Query logs in a database
+
+If Blocky writes its query log to MySQL, PostgreSQL or TimescaleDB, the
+dashboard reads it over the network and needs no volumes. Use the same `type`
+and connection string as Blocky's `queryLog`, preferably with a read-only
+database user. The chart moves `target` into the Secret
+(`BLOCKY_DASHBOARD_QUERYLOG_TARGET`, or
+`BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TARGET` per instance), so with
+`secrets.existingSecret` put it there instead.
+
+```yaml
+config:
+  instances:
+    - name: primary
+      url: http://blocky-primary.blocky.svc:4000
+      queryLog:
+        type: postgresql
+        target: postgres://dashboard:password@postgres.blocky.svc:5432/blocky
+        days: 7
+        hostname: blocky-primary-%   # only when several Blockys share the database
+```
+
+`queryLog.enabled: false` hides the query log without removing its settings.
+
 ## Multiple instances with query logs
 
 Blocky's csv query logs are read from local directories, so mount each one

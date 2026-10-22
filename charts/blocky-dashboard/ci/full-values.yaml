@@ -15,6 +15,10 @@ config:
     - name: office
       url: http://blocky-office:4000
       headers: {X-Foo: bar}
+      queryLog: {type: postgresql, target: "postgres://dash:pw@pg:5432/blocky", hostname: "office-%"}
+    - name: lab
+      url: http://blocky-lab:4000
+      queryLog: {enabled: false, type: csv, target: /logs/lab}
 queryLogVolumes:
   - name: home-logs
     mountPath: /logs/home

@@ -67,3 +67,30 @@ func TestInstanceTokenEnv(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestQueryLogTargetFromEnv(t *testing.T) {
+	c := Config{
+		QueryLog:  QueryLogConfig{Type: "postgresql"},
+		Instances: []InstanceConfig{{Name: "Home DNS", QueryLog: QueryLogConfig{Type: "mysql"}}},
+	}
+	env := map[string]string{
+		EnvQueryLogTarget: "postgres://single",
+		"BLOCKY_DASHBOARD_INSTANCE_HOME_DNS_QUERYLOG_TARGET": "user:pw@tcp(db:3306)/blocky",
+	}
+	c.ApplyEnv(func(k string) string { return env[k] })
+	if c.QueryLog.Target != "postgres://single" || c.Instances[0].QueryLog.Target != "user:pw@tcp(db:3306)/blocky" {
+		t.Fatalf("targets not applied: %q, %q", c.QueryLog.Target, c.Instances[0].QueryLog.Target)
+	}
+}
+
+func TestValidateRejectsUnknownQueryLogType(t *testing.T) {
+	c := Config{QueryLog: QueryLogConfig{Type: "sqlite", Target: "/data/blocky.db"}}
+	if err := c.Validate(); err == nil {
+		t.Fatal("sqlite should be rejected")
+	}
+	off := false
+	c.QueryLog.Enabled = &off
+	if err := c.Validate(); err != nil {
+		t.Fatalf("a disabled query log should not be validated: %v", err)
+	}
+}

@@ -12,69 +12,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/trappiz/blocky-dashboard/internal/config"
 )
 
-type Entry struct {
-	Time         time.Time `json:"time"`
-	ClientIP     string    `json:"clientIP"`
-	ClientName   string    `json:"clientName"`
-	Question     string    `json:"question"`
-	QuestionType string    `json:"questionType"`
-	ResponseType string    `json:"responseType"`
-	ResponseCode string    `json:"returnCode"`
-	Reason       string    `json:"reason"`
-	Answer       string    `json:"answer"`
-	DurationMS   float64   `json:"durationMs"`
-}
-
-type Reader struct {
-	cfg config.QueryLogConfig
-}
-
-func New(cfg config.QueryLogConfig) *Reader { return &Reader{cfg: cfg} }
-
-func (r *Reader) Enabled() bool {
-	t := strings.ToLower(r.cfg.Type)
-	return (t == "csv" || t == "csv-client") && r.cfg.Target != ""
-}
-
-type filter struct {
-	needle, client, rtype string
-}
-
-func (f filter) match(e Entry) bool {
-	if f.needle != "" && !strings.Contains(strings.ToLower(e.Question+" "+e.ClientName+" "+e.ClientIP), f.needle) {
-		return false
-	}
-	if f.client != "" && !strings.EqualFold(f.client, e.ClientName) && !strings.EqualFold(f.client, e.ClientIP) {
-		return false
-	}
-	if f.rtype != "" && !strings.EqualFold(f.rtype, e.ResponseType) {
-		return false
-	}
-	return true
-}
-
-// Read returns the newest entries matching the filters, newest first.
-func (r *Reader) Read(needle, client, rtype string, limit int) ([]Entry, error) {
-	if !r.Enabled() {
-		return nil, errors.New("query logging is not configured")
-	}
-	if limit <= 0 || limit > 1000 {
-		limit = 200
-	}
-	days := r.cfg.Days
-	if days < 1 {
-		days = 1
-	}
-	f := filter{needle: strings.ToLower(strings.TrimSpace(needle)), client: strings.TrimSpace(client), rtype: strings.TrimSpace(rtype)}
-
+// readFiles searches the daily csv files in dir, newest day first.
+func readFiles(dir string, f filter, days, limit int) ([]Entry, error) {
 	out := []Entry{} // encode as [] rather than null when nothing matches
 	now := time.Now()
 	for i := 0; i < days && len(out) < limit; i++ {
-		files, err := filesForDay(r.cfg.Target, now.AddDate(0, 0, -i))
+		files, err := filesForDay(dir, now.AddDate(0, 0, -i))
 		if err != nil {
 			return nil, err
 		}

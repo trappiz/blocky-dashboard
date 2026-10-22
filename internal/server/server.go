@@ -217,7 +217,7 @@ func (s *Server) queryLog(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	entries, err := in.logs.Read(q.Get("q"), q.Get("client"), q.Get("type"), limit)
+	entries, err := in.logs.Read(r.Context(), q.Get("q"), q.Get("client"), q.Get("type"), limit)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"enabled": in.logs.Enabled(), "error": err.Error()})
 		return
