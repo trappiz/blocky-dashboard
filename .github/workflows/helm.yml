@@ -8,6 +8,8 @@ name: helm
 #   - Docker Hub: oci://registry-1.docker.io/<DOCKERHUB_USERNAME>/<chart name>
 #                 (only when DOCKERHUB_USERNAME is set)
 #   - the GitHub Release for the tag, as a .tgz asset
+# Then it commits the new version and appVersion to Chart.yaml on the default
+# branch (stable tags newer than the current version only).
 #
 # Uses the same settings as docker.yml (Settings → Secrets and variables →
 # Actions), all optional:
@@ -148,3 +150,44 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: dist/*.tgz
+
+  # Commits the published version back to Chart.yaml on the default branch, so
+  # the file in the repository matches the latest release. Skips pre-releases
+  # and tags older than the version already there.
+  bump-chart:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Update version and appVersion
+        id: bump
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          current="$(yq '.version' "$CHART_DIR/Chart.yaml")"
+          if [[ "$version" == *-* ]]; then
+            echo "Pre-release $TAG; leaving Chart.yaml at $current."
+          elif [ "$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -n1)" != "$version" ] || [ "$current" = "$version" ]; then
+            echo "Chart.yaml is already at $current; nothing to do for $TAG."
+          else
+            VERSION="$version" yq -i '.version = strenv(VERSION) | .appVersion = strenv(TAG)' "$CHART_DIR/Chart.yaml"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          TAG: ${{ github.ref_name }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chart: bump to ${TAG}"
+          git pull --rebase origin "$BRANCH"
+          git push origin "HEAD:$BRANCH"

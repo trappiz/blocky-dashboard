@@ -179,7 +179,8 @@ The GitHub Actions workflows then:
 - `helm.yml`: lint the chart, and on tags publish it to `oci://ghcr.io/<owner>/charts` (and Docker
   Hub) and attach it to the release. The chart version has no `v` (`1.0.0`), because Helm ignores
   `v`-prefixed chart versions unless asked for exactly; its `appVersion` and default image tag
-  keep it (`v1.0.0`).
+  keep it (`v1.0.0`). Afterwards it commits the new version to `Chart.yaml` on `main`, so don't
+  bump it by hand (if `main` is protected, allow GitHub Actions to push to it).
 
 GHCR works with no setup, though new packages start private. Docker Hub is optional; configure it
 under **Settings → Secrets and variables → Actions**:
