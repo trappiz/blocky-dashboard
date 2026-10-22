@@ -1,0 +1,53 @@
+name: build
+
+# Builds static binaries for Linux, macOS and Windows (amd64 and arm64) on
+# every push to main and every pull request and uploads them as workflow
+# artifacts (Actions → run → Artifacts), so any commit can be downloaded and
+# tried. Release binaries for version tags are
+# built and attached to the GitHub Release by release.yml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64, ext: .exe }
+          - { goos: windows, goarch: arm64, ext: .exe }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          EXT: ${{ matrix.ext }}
+          CGO_ENABLED: "0"
+        run: |
+          version="dev-${GITHUB_SHA::7}"
+          go build -trimpath -ldflags="-s -w -X main.version=$version" -o "blocky-dashboard-${GOOS}-${GOARCH}${EXT}" ./cmd/blocky-dashboard
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blocky-dashboard-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: blocky-dashboard-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          if-no-files-found: error
+          retention-days: 14

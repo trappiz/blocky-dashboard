@@ -169,9 +169,11 @@ git tag v1.0.0 && git push origin v1.0.0
 
 The GitHub Actions workflows then:
 
+- `build.yml`: build binaries for Linux, macOS and Windows (amd64 and arm64) on every push to
+  `main` and every PR, downloadable from the run's *Artifacts* for 14 days.
 - `docker.yml`: test, then build images on every push and PR. Pushes to `main` publish `edge`; tags
   publish `1.0.0`, `1.0`, `1` (not for `0.x`) and `latest`.
-- `release.yml`: create a GitHub Release with Linux binaries and checksums. Tags like `v1.0.0-rc.1`
+- `release.yml`: create a GitHub Release with the same binaries and checksums. Tags like `v1.0.0-rc.1`
   become pre-releases.
 - `helm.yml`: lint the chart, and on tags publish it to `oci://ghcr.io/<owner>/charts` (and Docker
   Hub) and attach it to the release.

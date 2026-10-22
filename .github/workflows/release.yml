@@ -1,10 +1,11 @@
 name: release
 
-# For version tags (v1.2.3) creates the GitHub Release with Linux binaries,
-# checksums and generated notes that list the container images. The images
-# themselves are built by docker.yml, and helm.yml attaches the packaged
-# chart to the same release; softprops/action-gh-release reuses an existing
-# release for the tag, so the workflows can finish in any order.
+# For version tags (v1.2.3) creates the GitHub Release with Linux, macOS and
+# Windows binaries (amd64 and arm64), checksums and generated notes that list
+# the container images. The images themselves are built by docker.yml, and
+# helm.yml attaches the packaged chart to the same release;
+# softprops/action-gh-release reuses an existing release for the tag, so the
+# workflows can finish in any order.
 # Tags with a suffix (v1.2.3-rc.1) are marked as pre-releases.
 
 on:
@@ -20,10 +21,12 @@ jobs:
     strategy:
       matrix:
         include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64, ext: .exe }
+          - { goos: windows, goarch: arm64, ext: .exe }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -33,8 +36,9 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          EXT: ${{ matrix.ext }}
           CGO_ENABLED: "0"
-        run: go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME#v}" -o "blocky-dashboard-${GOOS}-${GOARCH}" ./cmd/blocky-dashboard
+        run: go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME#v}" -o "blocky-dashboard-${GOOS}-${GOARCH}${EXT}" ./cmd/blocky-dashboard
       - uses: actions/upload-artifact@v4
         with:
           name: blocky-dashboard-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -92,7 +96,7 @@ jobs:
             echo
             echo "## Binaries"
             echo
-            echo "Static Linux binaries are attached below; verify with \`sha256sum -c checksums.txt\`."
+            echo "Static binaries for Linux, macOS and Windows (amd64 and arm64) are attached below; verify with \`sha256sum -c checksums.txt\`."
           } > notes.md
 
       - uses: softprops/action-gh-release@v2
