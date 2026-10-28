@@ -62,7 +62,7 @@ jobs:
         if: env.PUSH == 'true' && steps.names.outputs.dockerhub == ''
         run: echo "::warning::DOCKERHUB_USERNAME is not set; pushing to GHCR only."
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
         if: env.PUSH == 'true'
