@@ -39,7 +39,7 @@ jobs:
           EXT: ${{ matrix.ext }}
           CGO_ENABLED: "0"
         run: go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "blocky-dashboard-${GITHUB_REF_NAME}-${GOOS}-${GOARCH}${EXT}" ./cmd/blocky-dashboard
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: blocky-dashboard-${{ matrix.goos }}-${{ matrix.goarch }}
           path: blocky-dashboard-*
