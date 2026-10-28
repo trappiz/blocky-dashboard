@@ -54,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
       - name: Lint and render with each ci/*-values.yaml
         run: |
           for values in "$CHART_DIR"/ci/*-values.yaml; do
@@ -73,7 +73,7 @@ jobs:
       packages: write # push the chart to GHCR
     steps:
       - uses: actions/checkout@v7
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
 
       - name: Resolve image and chart names
         id: images
