@@ -88,10 +88,20 @@ secrets:
   #   BLOCKY_DASHBOARD_AUTH_HEADER_TOKEN
   #   BLOCKY_DASHBOARD_BLOCKY_TOKEN              (single instance)
   #   BLOCKY_DASHBOARD_QUERYLOG_TARGET           (single instance, database DSN)
+  #   BLOCKY_DASHBOARD_QUERYLOG_TOKEN            (single instance, log server token)
   #   BLOCKY_DASHBOARD_INSTANCE_<NAME>_TOKEN     (per instance; name upper-cased,
   #                                               non-alphanumerics → _)
   #   BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TARGET
+  #   BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TOKEN
   existingSecret: ""
+  # Several existing Secrets, e.g. one for the auth password and one for the
+  # query log tokens. All are loaded together with existingSecret; when a key
+  # is in more than one, the last Secret listed wins. With any existing
+  # Secret set, the chart creates no Secret of its own, so keep secret values
+  # out of config.
+  existingSecrets: []
+  #  - blocky-dashboard-auth
+  #  - blocky-dashboard-querylog
 
 # Read-only volumes holding Blocky's csv query logs. Point
 # config.queryLog.target / instances[].queryLog.target at mountPath.

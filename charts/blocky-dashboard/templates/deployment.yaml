@@ -52,9 +52,9 @@ spec:
             {{- end }}
           {{- if or $hasSecret .Values.extraEnvFrom }}
           envFrom:
-            {{- if $hasSecret }}
+            {{- range include "blocky-dashboard.secretNames" . | fromJsonArray }}
             - secretRef:
-                name: {{ include "blocky-dashboard.secretName" . }}
+                name: {{ . }}
             {{- end }}
             {{- with .Values.extraEnvFrom }}
             {{- toYaml . | nindent 12 }}

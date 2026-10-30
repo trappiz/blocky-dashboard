@@ -10,5 +10,14 @@ blocky-dashboard is listening on port {{ .Values.containerPort }} (service port 
 {{- end }}
 {{- if and .Values.config.auth.enabled (not (include "blocky-dashboard.hasSecret" .)) }}
 
-WARNING: auth is enabled but no password was provided; set config.auth.password or secrets.existingSecret.
+WARNING: auth is enabled but no password was provided; set config.auth.password, or put
+BLOCKY_DASHBOARD_AUTH_PASSWORD in a Secret listed in secrets.existingSecret(s).
+{{- end }}
+{{- if and (include "blocky-dashboard.existingSecrets" . | fromJsonArray) (fromYaml (include "blocky-dashboard.secretData" .)) }}
+
+WARNING: secret values in config (passwords or tokens) are ignored because existing Secrets are
+set: {{ include "blocky-dashboard.existingSecrets" . | fromJsonArray | join ", " }}. Put them in one of those Secrets instead:
+{{- range $k, $v := fromYaml (include "blocky-dashboard.secretData" .) }}
+  {{ $k }}
+{{- end }}
 {{- end }}

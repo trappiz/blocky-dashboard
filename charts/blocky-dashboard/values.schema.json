@@ -89,7 +89,8 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "existingSecret": { "type": "string" }
+        "existingSecret": { "type": "string" },
+        "existingSecrets": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }
     },
     "queryLogVolumes": {

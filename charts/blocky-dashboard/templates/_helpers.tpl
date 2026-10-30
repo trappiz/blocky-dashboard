@@ -128,11 +128,27 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- toYaml $d }}
 {{- end }}
 
-{{- define "blocky-dashboard.secretName" -}}
-{{- default (include "blocky-dashboard.fullname" .) .Values.secrets.existingSecret }}
+{{/* Existing Secrets to load, as a JSON list: existingSecret, then existingSecrets. */}}
+{{- define "blocky-dashboard.existingSecrets" -}}
+{{- $s := list }}
+{{- with .Values.secrets.existingSecret }}{{ $s = append $s . }}{{ end }}
+{{- range .Values.secrets.existingSecrets }}{{ $s = append $s . }}{{ end }}
+{{- toJson (uniq $s) }}
+{{- end }}
+
+{{/* Names of the Secrets the pod loads: the existing ones, or else the chart's own. */}}
+{{- define "blocky-dashboard.secretNames" -}}
+{{- $existing := include "blocky-dashboard.existingSecrets" . | fromJsonArray }}
+{{- if $existing }}
+{{- toJson $existing }}
+{{- else if fromYaml (include "blocky-dashboard.secretData" .) }}
+{{- toJson (list (include "blocky-dashboard.fullname" .)) }}
+{{- else }}
+{{- toJson list }}
+{{- end }}
 {{- end }}
 
 {{/* Whether the pod reads secrets from a Secret at all. */}}
 {{- define "blocky-dashboard.hasSecret" -}}
-{{- if or .Values.secrets.existingSecret (fromYaml (include "blocky-dashboard.secretData" .)) }}true{{ end }}
+{{- if include "blocky-dashboard.secretNames" . | fromJsonArray }}true{{ end }}
 {{- end }}

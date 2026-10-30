@@ -156,14 +156,47 @@ config:
 ```
 
 or set `secrets.existingSecret` to a Secret whose keys are environment
-variable names. All keys are optional:
+variable names (or `secrets.existingSecrets` to several, see below). All keys
+are optional:
 
 | Key | Overrides |
 | --- | --- |
 | `BLOCKY_DASHBOARD_AUTH_PASSWORD` | `auth.password` |
 | `BLOCKY_DASHBOARD_AUTH_HEADER_TOKEN` | `auth.headerToken` |
 | `BLOCKY_DASHBOARD_BLOCKY_TOKEN` | `blocky.token` (single instance) |
+| `BLOCKY_DASHBOARD_QUERYLOG_TARGET` | `queryLog.target` (single instance, database DSN) |
+| `BLOCKY_DASHBOARD_QUERYLOG_TOKEN` | `queryLog.token` (single instance, log server token) |
 | `BLOCKY_DASHBOARD_INSTANCE_<NAME>_TOKEN` | `instances[].token`; `<NAME>` is the instance name upper-cased with runs of other characters replaced by `_` (`Office DNS` → `OFFICE_DNS`) |
+| `BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TARGET` | `instances[].queryLog.target` (database DSN) |
+| `BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TOKEN` | `instances[].queryLog.token` (log server token) |
+
+### Several Secrets
+
+`secrets.existingSecrets` loads several Secrets, for example to keep the auth
+password apart from the query log tokens so each can be rotated or shared on
+its own. They are loaded after `existingSecret`; when a key is in more than
+one, the last one listed wins. With any existing Secret set, the chart
+creates no Secret itself and ignores secret values in `config` (the install
+notes list them).
+
+```yaml
+config:
+  auth: {enabled: true, username: admin}
+  instances:
+    - name: dns1
+      url: http://10.1.1.60:4000
+      queryLog: {type: http, target: "http://10.1.1.60:4001/"}
+    - name: dns2
+      url: http://10.1.1.61:4000
+      queryLog: {type: http, target: "http://10.1.1.61:4001/"}
+secrets:
+  existingSecrets:
+    - blocky-dashboard-auth       # BLOCKY_DASHBOARD_AUTH_PASSWORD
+    - blocky-dashboard-querylog   # BLOCKY_DASHBOARD_INSTANCE_DNS1_QUERYLOG_TOKEN, ..._DNS2_...
+```
+
+Env vars from a Secret are read when the pod starts, so restart it
+(`kubectl rollout restart deployment/<release>`) after changing one.
 
 Values in `blocky.headers` / `instances[].headers` stay in the ConfigMap; do
 not put credentials there.
@@ -190,6 +223,7 @@ See [`values.yaml`](values.yaml) for every option with comments;
 | `image.digest` | `""` | Pins the image; overrides `tag` |
 | `config.*` | | App config, see `config.example.json` |
 | `secrets.existingSecret` | `""` | Secret with the keys above |
+| `secrets.existingSecrets` | `[]` | Several such Secrets, loaded after `existingSecret` |
 | `queryLogVolumes` | `[]` | Read-only log volumes |
 | `service.port` | `80` | |
 | `ingress.*`, `httpRoute.*`, `networkPolicy.*`, `podDisruptionBudget.*` | disabled | |
