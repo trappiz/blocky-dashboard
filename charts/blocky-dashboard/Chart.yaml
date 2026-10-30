@@ -6,8 +6,8 @@ type: application
 # (see .github/workflows/helm.yml): tag v1.2.3 gives version 1.2.3 and
 # appVersion v1.2.3, which is also the default image tag. The workflow then
 # commits them back here, so no manual bump is needed.
-version: 0.2.1
-appVersion: "v0.2.1"
+version: 0.2.2
+appVersion: "v0.2.2"
 keywords:
   - blocky
   - dns
