@@ -167,7 +167,7 @@ func toEntry(row []string, index map[string]int) Entry {
 
 func parseTime(v string) time.Time {
 	v = strings.TrimSpace(v)
-	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999 -0700 MST", "2006-01-02 15:04:05"} {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999Z07:00", "2006-01-02 15:04:05.999999999 -0700 MST", "2006-01-02 15:04:05"} {
 		if t, err := time.ParseInLocation(layout, v, time.Local); err == nil {
 			return t
 		}

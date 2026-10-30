@@ -1,5 +1,6 @@
-// Package querylog searches Blocky's query log, stored either as csv files
-// (queryLog.type csv or csv-client) or in a MySQL or PostgreSQL database.
+// Package querylog searches Blocky's query log, stored as csv files
+// (queryLog.type csv or csv-client), in a MySQL or PostgreSQL database, or
+// behind a small JSON log server on the Blocky host (type http).
 package querylog
 
 import (
@@ -30,14 +31,19 @@ type Reader struct {
 	cfg     config.QueryLogConfig
 	db      *sql.DB // nil for csv files
 	dialect dialect
-	err     error // why the database could not be opened
+	http    *httpSource // set for type http
+	err     error       // why the database or log server is unusable
 }
 
 // New prepares a reader. Database connections are opened on first use.
 func New(cfg config.QueryLogConfig) *Reader {
 	r := &Reader{cfg: cfg}
-	if r.Enabled() && config.IsDatabaseQueryLog(cfg.Type) {
+	switch {
+	case !r.Enabled():
+	case config.IsDatabaseQueryLog(cfg.Type):
 		r.db, r.dialect, r.err = openDB(cfg.Type, cfg.Target)
+	case config.IsHTTPQueryLog(cfg.Type):
+		r.http, r.err = newHTTPSource(cfg.Target)
 	}
 	return r
 }
@@ -81,6 +87,9 @@ func (r *Reader) Read(ctx context.Context, needle, client, rtype string, limit i
 		days = 1
 	}
 	f := filter{needle: strings.ToLower(strings.TrimSpace(needle)), client: strings.TrimSpace(client), rtype: strings.TrimSpace(rtype)}
+	if r.http != nil {
+		return r.http.read(ctx, f, limit)
+	}
 	if r.db != nil {
 		y, m, d := time.Now().AddDate(0, 0, 1-days).Date()
 		return r.readDB(ctx, f, time.Date(y, m, d, 0, 0, 0, 0, time.Local), limit)

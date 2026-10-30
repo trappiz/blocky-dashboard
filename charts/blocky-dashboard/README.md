@@ -78,6 +78,22 @@ config:
 
 `queryLog.enabled: false` hides the query log without removing its settings.
 
+## Query logs from a log server
+
+For csv or sqlite logs on a Blocky host outside the cluster, run a small
+JSON log server next to Blocky and point `queryLog.target` at it with
+`type: http` (the response format is in the main README). No volumes are
+needed. If `networkPolicy.egress.enabled` is on, add an egress rule for the
+log server's address and port.
+
+```yaml
+config:
+  instances:
+    - name: home-dns
+      url: http://10.1.1.60:4000
+      queryLog: {type: http, target: "http://10.1.1.60:4001/"}
+```
+
 ## Multiple instances with query logs
 
 Blocky's csv query logs are read from local directories, so mount each one

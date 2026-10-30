@@ -176,6 +176,9 @@ form button.primary { background: var(--accent); color: var(--accent-text); bord
 .badge.bad { color: var(--bad); background: var(--bad-bg); }
 .badge.info { color: var(--info); background: var(--info-bg); }
 
+.log-meta { display: flex; align-items: center; gap: 12px; }
+.log-meta label { display: flex; align-items: center; gap: 6px; }
+.log-meta select { padding: 4px 8px; font-size: .78rem; }
 .filters { display: grid; grid-template-columns: minmax(0, 1fr) 180px 170px auto; gap: 8px; margin-bottom: 12px; }
 .table-wrap { overflow-x: auto; max-height: 560px; overflow-y: auto; }
 .logs-table { width: 100%; border-collapse: collapse; font-size: .78rem; }

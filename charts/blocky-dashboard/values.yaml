@@ -47,12 +47,14 @@ config:
     # Set to false to hide the query log without removing its settings.
     enabled: true
     # Blocky's queryLog.type: csv or csv-client (log files, mount them with
-    # queryLogVolumes), or mysql, postgresql or timescale (read over the
-    # network). Empty disables query search.
+    # queryLogVolumes), mysql, postgresql or timescale (read over the
+    # network), or http (a JSON log server next to Blocky, for csv or
+    # sqlite logs on another host). Empty disables query search.
     type: ""
     # csv: directory inside the container. Database: the same connection
     # string (DSN) as Blocky's queryLog.target; it is moved into the Secret.
-    # Prefer a read-only database user.
+    # Prefer a read-only database user. http: the log server's URL,
+    # e.g. http://10.1.1.60:4001/.
     target: ""
     days: 1
     # Database shared by several Blocky servers: SQL LIKE pattern on the

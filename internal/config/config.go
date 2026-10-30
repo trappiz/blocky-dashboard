@@ -51,10 +51,14 @@ type AuthConfig struct {
 type QueryLogConfig struct {
 	// Enabled switches the query log off without removing its settings.
 	// Unset means on when type and target are set.
-	Enabled *bool  `json:"enabled,omitempty"`
-	Type    string `json:"type"`   // same as Blocky's queryLog.type: csv, csv-client, mysql, postgresql or timescale
-	Target  string `json:"target"` // log directory for csv, connection string (DSN) for a database
-	Days    int    `json:"days"`   // days to search, including today
+	Enabled *bool `json:"enabled,omitempty"`
+	// Type is Blocky's queryLog.type (csv, csv-client, mysql, postgresql or
+	// timescale), or http for a JSON log server running next to Blocky.
+	Type string `json:"type"`
+	// Target is the log directory for csv, the connection string (DSN) for a
+	// database, or the log server's URL for http.
+	Target string `json:"target"`
+	Days   int    `json:"days"` // days to search, including today
 	// Hostname limits a database shared by several Blocky servers to the
 	// entries written by this one: an SQL LIKE pattern on its hostname column.
 	Hostname string `json:"hostname"`
@@ -68,11 +72,14 @@ func (q QueryLogConfig) IsEnabled() bool { return q.Enabled == nil || *q.Enabled
 // query log type.
 func KnownQueryLogType(t string) bool {
 	switch strings.ToLower(t) {
-	case "csv", "csv-client":
+	case "csv", "csv-client", "http":
 		return true
 	}
 	return IsDatabaseQueryLog(t)
 }
+
+// IsHTTPQueryLog reports whether entries come from a JSON log server.
+func IsHTTPQueryLog(t string) bool { return strings.EqualFold(t, "http") }
 
 // IsDatabaseQueryLog reports whether the type stores entries in a database
 // reached over the network, rather than in local files.

@@ -92,7 +92,17 @@
     </article>
 
     <article class="panel block" id="logs" hidden>
-      <div class="panel-head"><h2>Query log</h2><span id="logStatus" class="muted small"></span></div>
+      <div class="panel-head">
+        <h2>Query log</h2>
+        <div class="log-meta">
+          <span id="logStatus" class="muted small"></span>
+          <label class="muted small">Show
+            <select id="logLimit" aria-label="Number of entries">
+              <option>100</option><option>200</option><option>500</option><option>1000</option>
+            </select>
+          </label>
+        </div>
+      </div>
       <form id="logForm" class="filters">
         <input id="logSearch" type="search" placeholder="Search domain or client…" autocomplete="off" aria-label="Search">
         <input id="logClient" placeholder="Client" autocomplete="off" aria-label="Client">

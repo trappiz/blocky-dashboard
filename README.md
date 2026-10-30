@@ -7,8 +7,9 @@ single Go binary with the UI embedded.
 - Query stats for the last 24 hours: chart, outcome and query-type breakdown, top domains, top
   blocked domains and top clients
 - DNS query tester, cache flush and list refresh
-- Optional search in Blocky's query log: `csv` / `csv-client` files, or a MySQL, PostgreSQL or
-  TimescaleDB database
+- Optional search in Blocky's query log: `csv` / `csv-client` files, a MySQL, PostgreSQL or
+  TimescaleDB database, or a small JSON log server on the Blocky host (for `csv` or `sqlite` logs
+  on another machine)
 - Optional Basic Auth or a trusted reverse-proxy header
 
 ## Blocky requirements
@@ -132,8 +133,27 @@ the dashboard or on a mounted share.
 "queryLog": { "type": "csv", "target": "/var/lib/blocky/logs", "days": 2 }
 ```
 
-`sqlite` isn't supported, since only Blocky's host can read the file. Query logs show your
-network's activity, so enable auth before exposing the dashboard.
+**Log server** (`http`): for `csv` or `sqlite` logs on another host, run a small HTTP service next to
+Blocky that returns recent entries as JSON, and set `target` to its URL. The dashboard expects
+`GET <target>` to answer with an array of objects, newest first:
+
+```json
+[{"timestamp": "2026-10-30 11:13:56.2+01:00", "client_ip": "10.1.1.65", "client_name": "laptop",
+  "reply_type": "CACHED", "domain": "example.com", "status": "NOERROR", "type": "A"}]
+```
+
+`reason`, `answer` and `duration_ms` are used when present. The dashboard sends its filters as
+`?q=…&client=…&type=…&limit=…` and filters again itself, so a server that ignores the parameters
+still works; it only searches what the server returns, though, so a server that applies them can
+search further back. `days` doesn't apply.
+
+```json
+"queryLog": { "type": "http", "target": "http://10.1.1.60:4001/" }
+```
+
+`sqlite` can't be read directly, since only Blocky's host can open the file; use a log server.
+Query logs show your network's activity, so enable auth before exposing the dashboard, and keep
+the log server reachable only from the dashboard.
 
 ### Authentication
 

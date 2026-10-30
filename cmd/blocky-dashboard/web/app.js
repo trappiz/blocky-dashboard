@@ -413,15 +413,23 @@ function outcomeBadge(type) {
 
 /* ---------- query log ---------- */
 
+// Rows to show in the query log; the default keeps the table short.
+const DEFAULT_LOG_LIMIT = 100;
+
+function logLimit() {
+  return Number($('logLimit').value) || DEFAULT_LOG_LIMIT;
+}
+
 let logSeq = 0;
 async function loadLogs() {
   const seq = ++logSeq;
-  const params = new URLSearchParams({ instance: selected().id, q: $('logSearch').value.trim(), client: $('logClient').value.trim(), type: $('logType').value, limit: 200 });
+  const limit = logLimit();
+  const params = new URLSearchParams({ instance: selected().id, q: $('logSearch').value.trim(), client: $('logClient').value.trim(), type: $('logType').value, limit });
   try {
     const d = await api('api/query-log?' + params);
     if (seq !== logSeq) return;
     const rows = d.entries || [];
-    $('logStatus').textContent = rows.length === 200 ? 'Newest 200 matches' : `${rows.length} matches`;
+    $('logStatus').textContent = rows.length >= limit ? `Newest ${limit}` : `${rows.length} matches`;
     renderLogs(rows);
   } catch (e) {
     if (seq !== logSeq) return;
@@ -492,6 +500,12 @@ function wire() {
   $('logSearch').addEventListener('input', debounced);
   $('logClient').addEventListener('input', debounced);
   $('logType').addEventListener('change', loadLogs);
+  try { $('logLimit').value = localStorage.getItem('logLimit') || DEFAULT_LOG_LIMIT; } catch { $('logLimit').value = DEFAULT_LOG_LIMIT; }
+  if (!$('logLimit').value) $('logLimit').value = DEFAULT_LOG_LIMIT;
+  $('logLimit').addEventListener('change', () => {
+    try { localStorage.setItem('logLimit', $('logLimit').value); } catch {}
+    loadLogs();
+  });
   $('logForm').addEventListener('submit', e => { e.preventDefault(); loadLogs(); });
   $('logClear').addEventListener('click', () => { $('logForm').reset(); loadLogs(); });
 
