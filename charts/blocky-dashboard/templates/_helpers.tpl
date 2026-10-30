@@ -136,16 +136,17 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- toJson (uniq $s) }}
 {{- end }}
 
-{{/* Names of the Secrets the pod loads: the existing ones, or else the chart's own. */}}
+{{/* Names of the Secrets the pod loads: the chart's own (secret values from
+config) first, then the existing ones, which win when a key is in both. */}}
 {{- define "blocky-dashboard.secretNames" -}}
-{{- $existing := include "blocky-dashboard.existingSecrets" . | fromJsonArray }}
-{{- if $existing }}
-{{- toJson $existing }}
-{{- else if fromYaml (include "blocky-dashboard.secretData" .) }}
-{{- toJson (list (include "blocky-dashboard.fullname" .)) }}
-{{- else }}
-{{- toJson list }}
+{{- $names := list }}
+{{- if fromYaml (include "blocky-dashboard.secretData" .) }}
+{{- $names = append $names (include "blocky-dashboard.fullname" .) }}
 {{- end }}
+{{- range include "blocky-dashboard.existingSecrets" . | fromJsonArray }}
+{{- $names = append $names . }}
+{{- end }}
+{{- toJson (uniq $names) }}
 {{- end }}
 
 {{/* Whether the pod reads secrets from a Secret at all. */}}

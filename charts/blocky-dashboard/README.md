@@ -61,8 +61,8 @@ dashboard reads it over the network and needs no volumes. Use the same `type`
 and connection string as Blocky's `queryLog`, preferably with a read-only
 database user. The chart moves `target` into the Secret
 (`BLOCKY_DASHBOARD_QUERYLOG_TARGET`, or
-`BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TARGET` per instance), so with
-`secrets.existingSecret` put it there instead.
+`BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TARGET` per instance); or leave it
+out of values and put it in an existing Secret under that key.
 
 ```yaml
 config:
@@ -96,8 +96,8 @@ config:
 
 `token` goes into the Secret as
 `BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TOKEN` (or
-`BLOCKY_DASHBOARD_QUERYLOG_TOKEN` for the single-instance `queryLog`); with
-`secrets.existingSecret`, put it there instead.
+`BLOCKY_DASHBOARD_QUERYLOG_TOKEN` for the single-instance `queryLog`); or
+leave it out of values and put it in an existing Secret under that key.
 
 ## Multiple instances with query logs
 
@@ -174,10 +174,24 @@ are optional:
 
 `secrets.existingSecrets` loads several Secrets, for example to keep the auth
 password apart from the query log tokens so each can be rotated or shared on
-its own. They are loaded after `existingSecret`; when a key is in more than
-one, the last one listed wins. With any existing Secret set, the chart
-creates no Secret itself and ignores secret values in `config` (the install
-notes list them).
+its own. They are loaded after `existingSecret`.
+
+Secret values set in `config` still go into the Secret the chart creates
+(named after the release), so you can mix the two: for example the auth
+password in your values and the query log tokens in an existing Secret. The
+pod loads the chart's Secret first and the existing ones after it, so when a
+key is in more than one place, the existing Secret listed last wins. Don't
+list a Secret with the same name as the chart's own; the chart stops with an
+error if you do while also setting secret values in `config`.
+
+```yaml
+config:
+  auth: {enabled: true, username: admin, password: "..."}   # → the chart's Secret
+  instances: [...]
+secrets:
+  existingSecrets:
+    - blocky-dashboard-querylog   # BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TOKEN keys
+```
 
 ```yaml
 config:
@@ -223,7 +237,7 @@ See [`values.yaml`](values.yaml) for every option with comments;
 | `image.digest` | `""` | Pins the image; overrides `tag` |
 | `config.*` | | App config, see `config.example.json` |
 | `secrets.existingSecret` | `""` | Secret with the keys above |
-| `secrets.existingSecrets` | `[]` | Several such Secrets, loaded after `existingSecret` |
+| `secrets.existingSecrets` | `[]` | Several such Secrets, loaded after `existingSecret`; can be mixed with secret values in `config` |
 | `queryLogVolumes` | `[]` | Read-only log volumes |
 | `service.port` | `80` | |
 | `ingress.*`, `httpRoute.*`, `networkPolicy.*`, `podDisruptionBudget.*` | disabled | |

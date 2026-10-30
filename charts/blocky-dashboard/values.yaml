@@ -57,8 +57,8 @@ config:
     # e.g. http://10.1.1.60:4001/.
     target: ""
     # http only: token the log server requires, sent as a bearer token. It
-    # is moved into the Secret; with secrets.existingSecret, put it there as
-    # BLOCKY_DASHBOARD_QUERYLOG_TOKEN instead.
+    # is moved into the chart's Secret; or leave it empty and put it in an
+    # existing Secret as BLOCKY_DASHBOARD_QUERYLOG_TOKEN.
     token: ""
     days: 1
     # Database shared by several Blocky servers: SQL LIKE pattern on the
@@ -95,10 +95,11 @@ secrets:
   #   BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TOKEN
   existingSecret: ""
   # Several existing Secrets, e.g. one for the auth password and one for the
-  # query log tokens. All are loaded together with existingSecret; when a key
-  # is in more than one, the last Secret listed wins. With any existing
-  # Secret set, the chart creates no Secret of its own, so keep secret values
-  # out of config.
+  # query log tokens. They are loaded after existingSecret. Secret values set
+  # in config (passwords, tokens) still go into the Secret this chart
+  # creates, so the two can be mixed, e.g. the password in values and the
+  # query log tokens in an existing Secret. When a key is in more than one
+  # place, the existing Secret listed last wins.
   existingSecrets: []
   #  - blocky-dashboard-auth
   #  - blocky-dashboard-querylog
