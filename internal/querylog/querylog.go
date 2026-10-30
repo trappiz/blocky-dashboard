@@ -43,7 +43,7 @@ func New(cfg config.QueryLogConfig) *Reader {
 	case config.IsDatabaseQueryLog(cfg.Type):
 		r.db, r.dialect, r.err = openDB(cfg.Type, cfg.Target)
 	case config.IsHTTPQueryLog(cfg.Type):
-		r.http, r.err = newHTTPSource(cfg.Target)
+		r.http, r.err = newHTTPSource(cfg.Target, cfg.Token)
 	}
 	return r
 }

@@ -18,6 +18,7 @@
         "enabled": { "type": "boolean" },
         "type": { "type": "string", "enum": ["", "csv", "csv-client", "mysql", "postgresql", "postgres", "timescale", "http"] },
         "target": { "type": "string" },
+        "token": { "type": "string" },
         "days": { "type": "integer", "minimum": 1 },
         "hostname": { "type": "string" }
       }

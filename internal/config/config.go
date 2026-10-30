@@ -58,7 +58,9 @@ type QueryLogConfig struct {
 	// Target is the log directory for csv, the connection string (DSN) for a
 	// database, or the log server's URL for http.
 	Target string `json:"target"`
-	Days   int    `json:"days"` // days to search, including today
+	// Token is sent to an http log server as "Authorization: Bearer <token>".
+	Token string `json:"token,omitempty"`
+	Days  int    `json:"days"` // days to search, including today
 	// Hostname limits a database shared by several Blocky servers to the
 	// entries written by this one: an SQL LIKE pattern on its hostname column.
 	Hostname string `json:"hostname"`
@@ -169,6 +171,7 @@ const (
 	EnvAuthHeaderToken = "BLOCKY_DASHBOARD_AUTH_HEADER_TOKEN"
 	EnvBlockyToken     = "BLOCKY_DASHBOARD_BLOCKY_TOKEN"
 	EnvQueryLogTarget  = "BLOCKY_DASHBOARD_QUERYLOG_TARGET"
+	EnvQueryLogToken   = "BLOCKY_DASHBOARD_QUERYLOG_TOKEN"
 )
 
 // ApplyEnv overrides secrets with non-empty environment variables: the auth
@@ -186,9 +189,11 @@ func (c *Config) ApplyEnv(getenv func(string) string) {
 	set(&c.Auth.HeaderToken, EnvAuthHeaderToken)
 	set(&c.Blocky.Token, EnvBlockyToken)
 	set(&c.QueryLog.Target, EnvQueryLogTarget)
+	set(&c.QueryLog.Token, EnvQueryLogToken)
 	for i := range c.Instances {
 		set(&c.Instances[i].Token, InstanceTokenEnv(c.Instances[i].Name))
 		set(&c.Instances[i].QueryLog.Target, InstanceQueryLogTargetEnv(c.Instances[i].Name))
+		set(&c.Instances[i].QueryLog.Token, InstanceQueryLogTokenEnv(c.Instances[i].Name))
 	}
 }
 
@@ -199,6 +204,10 @@ func InstanceTokenEnv(name string) string { return instanceEnv(name, "TOKEN") }
 // InstanceQueryLogTargetEnv names the variable holding an instance's query
 // log target: "Home DNS" → BLOCKY_DASHBOARD_INSTANCE_HOME_DNS_QUERYLOG_TARGET.
 func InstanceQueryLogTargetEnv(name string) string { return instanceEnv(name, "QUERYLOG_TARGET") }
+
+// InstanceQueryLogTokenEnv names the variable holding an instance's query log
+// server token: "Home DNS" → BLOCKY_DASHBOARD_INSTANCE_HOME_DNS_QUERYLOG_TOKEN.
+func InstanceQueryLogTokenEnv(name string) string { return instanceEnv(name, "QUERYLOG_TOKEN") }
 
 func instanceEnv(name, suffix string) string {
 	return "BLOCKY_DASHBOARD_INSTANCE_" + strings.ToUpper(strings.ReplaceAll(Slug(name), "-", "_")) + "_" + suffix

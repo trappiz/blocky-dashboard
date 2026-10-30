@@ -29,6 +29,7 @@ import (
 // filters again either way, so a server that ignores them still works.
 type httpSource struct {
 	url    string
+	token  string // sent as a bearer token when set
 	client *http.Client
 
 	mu     sync.Mutex
@@ -44,13 +45,14 @@ type cachedResponse struct {
 // the log server is not asked for the same data several times a second.
 const httpCacheTTL = 5 * time.Second
 
-func newHTTPSource(target string) (*httpSource, error) {
+func newHTTPSource(target, token string) (*httpSource, error) {
 	u, err := url.Parse(target)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, fmt.Errorf("query log target %q: want an http(s) URL", target)
 	}
 	return &httpSource{
 		url:    target,
+		token:  token,
 		client: &http.Client{Timeout: 10 * time.Second},
 		cached: map[string]cachedResponse{},
 	}, nil
@@ -123,6 +125,9 @@ func (s *httpSource) fetch(ctx context.Context, reqURL string) ([]Entry, error) 
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
+	if s.token != "" {
+		req.Header.Set("Authorization", "Bearer "+s.token)
+	}
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("query log server: %w", err)
@@ -131,6 +136,12 @@ func (s *httpSource) fetch(ctx context.Context, reqURL string) ([]Entry, error) 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	if err != nil {
 		return nil, fmt.Errorf("query log server: %w", err)
+	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		if s.token == "" {
+			return nil, fmt.Errorf("query log server: HTTP %d: it requires a token; set queryLog.token", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("query log server: HTTP %d: token rejected; check queryLog.token", resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
 		var e struct {

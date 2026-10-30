@@ -56,6 +56,10 @@ config:
     # Prefer a read-only database user. http: the log server's URL,
     # e.g. http://10.1.1.60:4001/.
     target: ""
+    # http only: token the log server requires, sent as a bearer token. It
+    # is moved into the Secret; with secrets.existingSecret, put it there as
+    # BLOCKY_DASHBOARD_QUERYLOG_TOKEN instead.
+    token: ""
     days: 1
     # Database shared by several Blocky servers: SQL LIKE pattern on the
     # hostname of the Blocky that wrote the entry, e.g. blocky-primary-%.

@@ -91,8 +91,13 @@ config:
   instances:
     - name: home-dns
       url: http://10.1.1.60:4000
-      queryLog: {type: http, target: "http://10.1.1.60:4001/"}
+      queryLog: {type: http, target: "http://10.1.1.60:4001/", token: "..."}
 ```
+
+`token` goes into the Secret as
+`BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TOKEN` (or
+`BLOCKY_DASHBOARD_QUERYLOG_TOKEN` for the single-instance `queryLog`); with
+`secrets.existingSecret`, put it there instead.
 
 ## Multiple instances with query logs
 

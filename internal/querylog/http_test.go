@@ -103,3 +103,34 @@ func TestHTTPSourceErrors(t *testing.T) {
 		t.Fatal("want error for a target without http://")
 	}
 }
+
+func TestHTTPSourceSendsToken(t *testing.T) {
+	var gotAuth atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth.Store(r.Header.Get("Authorization"))
+		if r.Header.Get("Authorization") != "Bearer s3cret" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error": "unauthorized"}`))
+			return
+		}
+		_, _ = w.Write([]byte(sample))
+	}))
+	t.Cleanup(srv.Close)
+
+	got, err := New(config.QueryLogConfig{Type: "http", Target: srv.URL, Token: "s3cret"}).Read(context.Background(), "", "", "", 10)
+	if err != nil || len(got) != 3 {
+		t.Fatalf("authorized read failed: %v (%d entries)", err, len(got))
+	}
+	if gotAuth.Load() != "Bearer s3cret" {
+		t.Fatalf("Authorization header = %q", gotAuth.Load())
+	}
+
+	_, err = New(config.QueryLogConfig{Type: "http", Target: srv.URL}).Read(context.Background(), "", "", "", 10)
+	if err == nil || !strings.Contains(err.Error(), "requires a token") {
+		t.Fatalf("want a missing-token error, got %v", err)
+	}
+	_, err = New(config.QueryLogConfig{Type: "http", Target: srv.URL, Token: "wrong"}).Read(context.Background(), "", "", "", 10)
+	if err == nil || !strings.Contains(err.Error(), "token rejected") || strings.Contains(err.Error(), "wrong") {
+		t.Fatalf("want a rejected-token error without the token in it, got %v", err)
+	}
+}

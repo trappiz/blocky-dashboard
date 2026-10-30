@@ -148,8 +148,14 @@ still works; it only searches what the server returns, though, so a server that 
 search further back. `days` doesn't apply.
 
 ```json
-"queryLog": { "type": "http", "target": "http://10.1.1.60:4001/" }
+"queryLog": { "type": "http", "target": "http://10.1.1.60:4001/", "token": "..." }
 ```
+
+`token` is optional; when set, it's sent as `Authorization: Bearer <token>`, and the server should
+reject requests without it. Pass it through `BLOCKY_DASHBOARD_QUERYLOG_TOKEN` (or
+`BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TOKEN`) rather than the file. The token travels in
+plain text over `http://`, so use `https://` (for example behind a reverse proxy) if the network
+between the dashboard and Blocky isn't trusted.
 
 `sqlite` can't be read directly, since only Blocky's host can open the file; use a log server.
 Query logs show your network's activity, so enable auth before exposing the dashboard, and keep
@@ -174,8 +180,10 @@ Secrets can come from environment variables instead of the file:
 | `BLOCKY_DASHBOARD_AUTH_HEADER_TOKEN` | `auth.headerToken` |
 | `BLOCKY_DASHBOARD_BLOCKY_TOKEN` | `blocky.token` |
 | `BLOCKY_DASHBOARD_QUERYLOG_TARGET` | `queryLog.target` |
+| `BLOCKY_DASHBOARD_QUERYLOG_TOKEN` | `queryLog.token` |
 | `BLOCKY_DASHBOARD_INSTANCE_<NAME>_TOKEN` | the token of instance `<NAME>`, upper-cased with other characters as `_` (`Office DNS` → `OFFICE_DNS`) |
 | `BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TARGET` | the query log target of instance `<NAME>` |
+| `BLOCKY_DASHBOARD_INSTANCE_<NAME>_QUERYLOG_TOKEN` | the query log server token of instance `<NAME>` |
 
 ### Reverse proxy
 

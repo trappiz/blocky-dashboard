@@ -94,3 +94,18 @@ func TestValidateRejectsUnknownQueryLogType(t *testing.T) {
 		t.Fatalf("a disabled query log should not be validated: %v", err)
 	}
 }
+
+func TestApplyEnvQueryLogToken(t *testing.T) {
+	env := map[string]string{
+		EnvQueryLogToken: "top",
+		"BLOCKY_DASHBOARD_INSTANCE_HOME_DNS_QUERYLOG_TOKEN": "home",
+	}
+	c := Config{Instances: []InstanceConfig{{Name: "Home DNS"}, {Name: "office", QueryLog: QueryLogConfig{Token: "file"}}}}
+	c.ApplyEnv(func(k string) string { return env[k] })
+	if c.QueryLog.Token != "top" || c.Instances[0].QueryLog.Token != "home" || c.Instances[1].QueryLog.Token != "file" {
+		t.Fatalf("query log tokens wrong: %q %q %q", c.QueryLog.Token, c.Instances[0].QueryLog.Token, c.Instances[1].QueryLog.Token)
+	}
+	if got := InstanceQueryLogTokenEnv("Home DNS"); got != "BLOCKY_DASHBOARD_INSTANCE_HOME_DNS_QUERYLOG_TOKEN" {
+		t.Fatalf("got %q", got)
+	}
+}

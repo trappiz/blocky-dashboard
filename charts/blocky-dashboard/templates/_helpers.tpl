@@ -69,17 +69,22 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- include "blocky-dashboard.instanceTokenEnv" . | trimSuffix "_TOKEN" }}_QUERYLOG_TARGET
 {{- end }}
 
+{{/* Environment variable holding an instance's query log server token; mirrors config.InstanceQueryLogTokenEnv. */}}
+{{- define "blocky-dashboard.instanceQueryLogTokenEnv" -}}
+{{- include "blocky-dashboard.instanceTokenEnv" . | trimSuffix "_TOKEN" }}_QUERYLOG_TOKEN
+{{- end }}
+
 {{/* Whether a queryLog block points at a database; its target (DSN) is then a secret. */}}
 {{- define "blocky-dashboard.queryLogIsDatabase" -}}
 {{- if has (lower (default "" .type)) (list "mysql" "postgresql" "postgres" "timescale") }}true{{ end }}
 {{- end }}
 
-{{/* queryLog block without a database connection string. */}}
+{{/* queryLog block without secrets: the token, and a database connection string. */}}
 {{- define "blocky-dashboard.queryLogJson" -}}
 {{- if include "blocky-dashboard.queryLogIsDatabase" . }}
-{{- toJson (omit . "target") }}
+{{- toJson (omit . "target" "token") }}
 {{- else }}
-{{- toJson . }}
+{{- toJson (omit . "token") }}
 {{- end }}
 {{- end }}
 
@@ -110,12 +115,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- with $c.blocky.token }}{{ $_ := set $d "BLOCKY_DASHBOARD_BLOCKY_TOKEN" . }}{{ end }}
 {{- with $c.queryLog }}
 {{- if and .target (include "blocky-dashboard.queryLogIsDatabase" .) }}{{ $_ := set $d "BLOCKY_DASHBOARD_QUERYLOG_TARGET" .target }}{{ end }}
+{{- with .token }}{{ $_ := set $d "BLOCKY_DASHBOARD_QUERYLOG_TOKEN" . }}{{ end }}
 {{- end }}
 {{- range $c.instances }}
 {{- if .token }}{{ $_ := set $d (include "blocky-dashboard.instanceTokenEnv" .name) .token }}{{ end }}
 {{- $name := .name }}
 {{- with .queryLog }}
 {{- if and .target (include "blocky-dashboard.queryLogIsDatabase" .) }}{{ $_ := set $d (include "blocky-dashboard.instanceQueryLogTargetEnv" $name) .target }}{{ end }}
+{{- with .token }}{{ $_ := set $d (include "blocky-dashboard.instanceQueryLogTokenEnv" $name) . }}{{ end }}
 {{- end }}
 {{- end }}
 {{- toYaml $d }}
