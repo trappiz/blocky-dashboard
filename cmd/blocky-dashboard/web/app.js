@@ -483,8 +483,31 @@ function confirmClick(btn, run) {
   }, 4000);
 }
 
+// Theme switch: cycles system → light → dark. theme.js applies the choice.
+const THEMES = {
+  system: { icon: '◐', next: 'light', label: 'Theme: follow system' },
+  light: { icon: '☀', next: 'dark', label: 'Theme: light' },
+  dark: { icon: '☾', next: 'system', label: 'Theme: dark' },
+};
+
+function renderThemeBtn() {
+  const t = THEMES[window.blockyTheme ? window.blockyTheme.pref() : 'system'];
+  $('themeBtn').textContent = t.icon;
+  $('themeBtn').title = t.label + ' (click to change)';
+  $('themeBtn').setAttribute('aria-label', t.label);
+}
+
 function wire() {
   $('refreshBtn').addEventListener('click', load);
+  if (window.blockyTheme) {
+    renderThemeBtn();
+    $('themeBtn').addEventListener('click', () => {
+      window.blockyTheme.set(THEMES[window.blockyTheme.pref()].next);
+      renderThemeBtn();
+    });
+  } else {
+    $('themeBtn').hidden = true;
+  }
   document.querySelectorAll('[data-action]').forEach(btn => btn.addEventListener('click', () => confirmClick(btn, () => {
     btn.closest('details').open = false;
     runAction(withInstance('api/' + btn.dataset.action, 'all'), btn.dataset.label + ' done');
