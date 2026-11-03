@@ -28,8 +28,8 @@ jobs:
           - { goos: windows, goarch: amd64, ext: .exe }
           - { goos: windows, goarch: arm64, ext: .exe }
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       - name: Build
@@ -39,7 +39,7 @@ jobs:
           EXT: ${{ matrix.ext }}
           CGO_ENABLED: "0"
         run: go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "blocky-dashboard-${GITHUB_REF_NAME}-${GOOS}-${GOARCH}${EXT}" ./cmd/blocky-dashboard
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: blocky-dashboard-${{ matrix.goos }}-${{ matrix.goarch }}
           path: blocky-dashboard-*
@@ -50,7 +50,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Resolve image names
         id: names
@@ -60,7 +60,7 @@ jobs:
           image-name: ${{ vars.IMAGE_NAME }}
           chart-name: ${{ vars.CHART_NAME }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
@@ -101,7 +101,7 @@ jobs:
             echo "Static binaries for Linux, macOS and Windows (amd64 and arm64) are attached below; verify with \`sha256sum -c checksums.txt\`."
           } > notes.md
 
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           body_path: notes.md
           generate_release_notes: true

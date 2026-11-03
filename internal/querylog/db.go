@@ -3,7 +3,8 @@ package querylog
 import (
 	"context"
 	"database/sql"
-	"fmt"
+	"errors"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -28,18 +29,18 @@ func openDB(typ, dsn string) (*sql.DB, dialect, error) {
 	case "mysql":
 		cfg, err := mysql.ParseDSN(dsn)
 		if err != nil {
-			return nil, 0, fmt.Errorf("query log target: %w", err)
+			return nil, 0, dbError("the query log target (connection string) is invalid", err)
 		}
 		cfg.ParseTime = true // scan request_ts into time.Time even if the DSN omits parseTime
 		conn, err := mysql.NewConnector(cfg)
 		if err != nil {
-			return nil, 0, fmt.Errorf("query log target: %w", err)
+			return nil, 0, dbError("the query log target (connection string) is invalid", err)
 		}
 		db, d = sql.OpenDB(conn), dialectMySQL
 	default: // postgresql, postgres, timescale
 		var err error
 		if db, err = sql.Open("pgx", dsn); err != nil {
-			return nil, 0, fmt.Errorf("query log target: %w", err)
+			return nil, 0, dbError("the query log target (connection string) is invalid", err)
 		}
 		d = dialectPostgres
 	}
@@ -97,7 +98,7 @@ func (r *Reader) readDB(ctx context.Context, f filter, since time.Time, limit in
 	q, args := buildQuery(r.dialect, f, r.cfg.Hostname, since, limit)
 	rows, err := r.db.QueryContext(ctx, q, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query log database: %w", err)
+		return nil, dbError("the query log database query failed", err)
 	}
 	defer rows.Close()
 
@@ -107,7 +108,7 @@ func (r *Reader) readDB(ctx context.Context, f filter, since time.Time, limit in
 		var ip, name, reason, rtype, qtype, question, answer, code sql.NullString
 		var duration sql.NullInt64
 		if err := rows.Scan(&e.Time, &ip, &name, &duration, &reason, &rtype, &qtype, &question, &answer, &code); err != nil {
-			return nil, fmt.Errorf("query log database: %w", err)
+			return nil, dbError("the query log database query failed", err)
 		}
 		e.ClientIP, e.ClientName, e.Reason, e.ResponseType = ip.String, name.String, reason.String, rtype.String
 		e.QuestionType, e.Question, e.Answer, e.ResponseCode = qtype.String, question.String, answer.String, code.String
@@ -115,7 +116,14 @@ func (r *Reader) readDB(ctx context.Context, f filter, since time.Time, limit in
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("query log database: %w", err)
+		return nil, dbError("the query log database query failed", err)
 	}
 	return out, nil
+}
+
+// dbError logs the driver's error, which can name the database host and user,
+// and returns a short message for the browser.
+func dbError(msg string, err error) error {
+	log.Printf("query log database: %s: %v", msg, err)
+	return errors.New(msg + "; see the dashboard log for details")
 }

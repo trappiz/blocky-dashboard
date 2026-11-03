@@ -21,6 +21,7 @@ type Server struct {
 	cfg       config.Config
 	instances []*instance
 	web       fs.FS
+	logins    *loginLimiter
 }
 
 func New(cfg config.Config, embedded embed.FS) (*Server, error) {
@@ -32,7 +33,7 @@ func New(cfg config.Config, embedded embed.FS) (*Server, error) {
 }
 
 func newServer(cfg config.Config, web fs.FS) *Server {
-	s := &Server{cfg: cfg, web: web}
+	s := &Server{cfg: cfg, web: web, logins: newLoginLimiter(10, time.Minute)}
 	for _, in := range cfg.ResolvedInstances() {
 		s.instances = append(s.instances, &instance{
 			ID:     config.Slug(in.Name),
@@ -74,7 +75,30 @@ func (s *Server) Handler() http.Handler {
 	root := http.NewServeMux()
 	root.HandleFunc("/healthz", s.healthz)
 	root.Handle("/", s.auth(logging(h)))
-	return root
+	return securityHeaders(root)
+}
+
+// contentSecurityPolicy allows only the dashboard's own scripts, styles and
+// API: no inline scripts, plugins, <base> rewrites, foreign form targets or
+// framing.
+const contentSecurityPolicy = "default-src 'self'; img-src 'self' data:; object-src 'none'; " +
+	"base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+
+// securityHeaders sets headers for every response, including API and static
+// files. API responses are never cached: they carry the query log.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		h.Set("Cross-Origin-Resource-Policy", "same-origin")
+		if strings.Contains(r.URL.Path, "/api/") {
+			h.Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) auth(next http.Handler) http.Handler {
@@ -82,20 +106,41 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := clientIP(r)
+		if wait := s.logins.retryAfter(ip); wait > 0 {
+			tooManyAttempts(w, wait)
+			return
+		}
+		allow := func() {
+			s.logins.succeed(ip)
+			next.ServeHTTP(w, r)
+		}
 		if s.cfg.Auth.HeaderToken != "" {
 			got := r.Header.Get("X-Blocky-Dashboard-Token")
 			if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.Auth.HeaderToken)) == 1 {
-				next.ServeHTTP(w, r)
+				allow()
 				return
 			}
 		}
-		u, p, ok := r.BasicAuth()
-		if ok && subtle.ConstantTimeCompare([]byte(u), []byte(s.cfg.Auth.Username)) == 1 &&
-			subtle.ConstantTimeCompare([]byte(p), []byte(s.cfg.Auth.Password)) == 1 {
-			next.ServeHTTP(w, r)
-			return
+		// Basic Auth only when both a username and a password are configured;
+		// otherwise empty credentials would compare equal to empty settings.
+		if s.cfg.Auth.BasicEnabled() {
+			u, p, ok := r.BasicAuth()
+			if ok && u != "" && p != "" &&
+				subtle.ConstantTimeCompare([]byte(u), []byte(s.cfg.Auth.Username)) == 1 &&
+				subtle.ConstantTimeCompare([]byte(p), []byte(s.cfg.Auth.Password)) == 1 {
+				allow()
+				return
+			}
 		}
-		w.Header().Set("WWW-Authenticate", `Basic realm="Blocky Dashboard"`)
+		// Count only attempts that sent credentials: the browser's first,
+		// credential-less request just triggers the login prompt.
+		if r.Header.Get("Authorization") != "" || r.Header.Get("X-Blocky-Dashboard-Token") != "" {
+			s.logins.fail(ip)
+		}
+		if s.cfg.Auth.BasicEnabled() {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Blocky Dashboard"`)
+		}
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 	})
 }
@@ -189,6 +234,7 @@ func (s *Server) query(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var q queryRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&q); err != nil || strings.TrimSpace(q.Query) == "" {
 		http.Error(w, "query is required", http.StatusBadRequest)
 		return
@@ -274,7 +320,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 	_, _ = w.Write(b)
 }
 

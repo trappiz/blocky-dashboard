@@ -8,6 +8,12 @@ blocky-dashboard is listening on port {{ .Values.containerPort }} (service port 
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "blocky-dashboard.fullname" . }} 3001:{{ .Values.service.port }}
   open http://127.0.0.1:3001{{ include "blocky-dashboard.basePath" . }}
 {{- end }}
+{{- if not .Values.config.auth.enabled }}
+
+WARNING: auth is disabled. Anything that can reach the Service can read the query log, flush
+caches and turn blocking off. Set config.auth.enabled=true with a password or headerToken,
+or restrict access with networkPolicy.enabled=true.
+{{- end }}
 {{- if and .Values.config.auth.enabled (not (include "blocky-dashboard.hasSecret" .)) }}
 
 WARNING: auth is enabled but no password was provided; set config.auth.password, or put

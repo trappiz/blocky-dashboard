@@ -109,3 +109,26 @@ func TestApplyEnvQueryLogToken(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestValidateAuth(t *testing.T) {
+	cases := []struct {
+		name string
+		auth AuthConfig
+		ok   bool
+	}{
+		{"off", AuthConfig{}, true},
+		{"basic", AuthConfig{Enabled: true, Username: "admin", Password: "pw"}, true},
+		{"token only", AuthConfig{Enabled: true, HeaderToken: "tok"}, true},
+		{"token with default username", AuthConfig{Enabled: true, Username: "admin", HeaderToken: "tok"}, true},
+		{"nothing set", AuthConfig{Enabled: true, Username: "admin"}, false},
+		{"password without username", AuthConfig{Enabled: true, Password: "pw"}, false},
+		{"example password", AuthConfig{Enabled: true, Username: "admin", Password: "change-me"}, false},
+		{"example password with token", AuthConfig{Enabled: true, Username: "admin", Password: "change-me", HeaderToken: "tok"}, false},
+	}
+	for _, c := range cases {
+		err := Config{Auth: c.auth}.Validate()
+		if (err == nil) != c.ok {
+			t.Errorf("%s: Validate() = %v, want ok=%v", c.name, err, c.ok)
+		}
+	}
+}

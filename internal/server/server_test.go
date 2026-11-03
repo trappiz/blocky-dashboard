@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/trappiz/blocky-dashboard/internal/config"
 )
@@ -226,5 +227,99 @@ func TestHealthzBypassesAuthAndBasePath(t *testing.T) {
 	}
 	if rec := do(h, http.MethodGet, "/dns/api/config", nil); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("api should still need auth, got %d", rec.Code)
+	}
+}
+
+func TestAuthRejectsEmptyAndUnconfiguredBasic(t *testing.T) {
+	cases := []struct {
+		name    string
+		auth    config.AuthConfig
+		headers map[string]string
+		want    int
+	}{
+		// Header-token mode: Basic is off, so empty credentials must not match
+		// the empty username/password.
+		{"token mode, empty basic", config.AuthConfig{Enabled: true, HeaderToken: "tok"}, map[string]string{"Authorization": "Basic Og=="}, http.StatusUnauthorized},
+		{"token mode, username only, empty basic", config.AuthConfig{Enabled: true, Username: "admin", HeaderToken: "tok"}, map[string]string{"Authorization": "Basic YWRtaW46"}, http.StatusUnauthorized},
+		{"token mode, right token", config.AuthConfig{Enabled: true, HeaderToken: "tok"}, map[string]string{"X-Blocky-Dashboard-Token": "tok"}, http.StatusOK},
+		{"token mode, wrong token", config.AuthConfig{Enabled: true, HeaderToken: "tok"}, map[string]string{"X-Blocky-Dashboard-Token": "nope"}, http.StatusUnauthorized},
+		// Basic mode.
+		{"basic, right", config.AuthConfig{Enabled: true, Username: "admin", Password: "pw"}, map[string]string{"Authorization": "Basic YWRtaW46cHc="}, http.StatusOK},
+		{"basic, empty", config.AuthConfig{Enabled: true, Username: "admin", Password: "pw"}, map[string]string{"Authorization": "Basic Og=="}, http.StatusUnauthorized},
+		{"basic, right user empty password", config.AuthConfig{Enabled: true, Username: "admin", Password: "pw"}, map[string]string{"Authorization": "Basic YWRtaW46"}, http.StatusUnauthorized},
+	}
+	for _, c := range cases {
+		s, _ := newTestServer(t, "/")
+		s.cfg.Auth = c.auth
+		rec := do(s.Handler(), http.MethodGet, "/api/config", c.headers)
+		if rec.Code != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, rec.Code, c.want)
+		}
+		if rec.Code == http.StatusUnauthorized {
+			if got, want := rec.Header().Get("WWW-Authenticate") != "", c.auth.BasicEnabled(); got != want {
+				t.Errorf("%s: Basic challenge sent = %v, want %v", c.name, got, want)
+			}
+		}
+	}
+}
+
+func TestSecurityHeaders(t *testing.T) {
+	s, _ := newTestServer(t, "/")
+	h := s.Handler()
+	for _, path := range []string{"/", "/app.js", "/api/config", "/healthz"} {
+		rec := do(h, http.MethodGet, path, nil)
+		for k, v := range map[string]string{"X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY"} {
+			if got := rec.Header().Get(k); got != v {
+				t.Errorf("%s: %s = %q, want %q", path, k, got, v)
+			}
+		}
+	}
+	if got := do(h, http.MethodGet, "/api/config", nil).Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("api Cache-Control = %q, want no-store", got)
+	}
+	csp := do(h, http.MethodGet, "/", nil).Header().Get("Content-Security-Policy")
+	for _, want := range []string{"default-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'"} {
+		if !strings.Contains(csp, want) {
+			t.Errorf("CSP %q is missing %q", csp, want)
+		}
+	}
+}
+
+func TestFailedLoginsAreRateLimited(t *testing.T) {
+	s, _ := newTestServer(t, "/")
+	s.cfg.Auth = config.AuthConfig{Enabled: true, Username: "admin", Password: "pw"}
+	now := time.Unix(1_000_000, 0)
+	s.logins.now = func() time.Time { return now }
+	h := s.Handler()
+	wrong := map[string]string{"Authorization": "Basic YWRtaW46d3Jvbmc="} // admin:wrong
+	right := map[string]string{"Authorization": "Basic YWRtaW46cHc="}     // admin:pw
+
+	// Requests without credentials (the login prompt) never count.
+	for i := 0; i < 20; i++ {
+		if rec := do(h, http.MethodGet, "/api/config", nil); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("credential-less request %d: got %d", i, rec.Code)
+		}
+	}
+	for i := 0; i < 10; i++ {
+		if rec := do(h, http.MethodGet, "/api/config", wrong); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("failed login %d: got %d", i, rec.Code)
+		}
+	}
+	rec := do(h, http.MethodGet, "/api/config", right)
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
+		t.Fatalf("after 10 failures even the right password should wait: got %d, Retry-After %q", rec.Code, rec.Header().Get("Retry-After"))
+	}
+	if rec := do(h, http.MethodGet, "/healthz", nil); rec.Code != http.StatusOK {
+		t.Fatalf("healthz must not be rate limited, got %d", rec.Code)
+	}
+
+	now = now.Add(61 * time.Second)
+	if rec := do(h, http.MethodGet, "/api/config", right); rec.Code != http.StatusOK {
+		t.Fatalf("after the window the right password should work: got %d", rec.Code)
+	}
+	// Success cleared the counter: one more failure doesn't lock out.
+	do(h, http.MethodGet, "/api/config", wrong)
+	if rec := do(h, http.MethodGet, "/api/config", right); rec.Code != http.StatusOK {
+		t.Fatalf("a single failure after success should not lock out: got %d", rec.Code)
 	}
 }

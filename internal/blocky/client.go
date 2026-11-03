@@ -69,7 +69,11 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 		return nil, resp.StatusCode, err
 	}
 	if resp.StatusCode >= 400 {
-		return data, resp.StatusCode, fmt.Errorf("blocky returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+		msg := strings.TrimSpace(string(data))
+		if len(msg) > 300 { // the error reaches the browser; keep it short
+			msg = msg[:300] + "…"
+		}
+		return data, resp.StatusCode, fmt.Errorf("blocky returned HTTP %d: %s", resp.StatusCode, msg)
 	}
 	return data, resp.StatusCode, nil
 }

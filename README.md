@@ -169,8 +169,19 @@ the log server reachable only from the dashboard.
 
 Alternatively, set `auth.headerToken` and have a trusted reverse proxy send it as
 `X-Blocky-Dashboard-Token`. Only use this when the dashboard isn't reachable except through that proxy.
+Basic Auth is only accepted when both `username` and `password` are set, so a header-token-only setup
+can't be entered with an empty login; you can set both to allow either method.
 
-The dashboard refuses to start with auth enabled and the example password `change-me`.
+The dashboard refuses to start with auth enabled and the example password `change-me` (in either
+mode), and logs a warning at startup when auth is disabled and it listens beyond `127.0.0.1`.
+
+After 10 failed logins from one IP within a minute, that IP gets `429 Too Many Requests` until the
+minute is up. Behind a reverse proxy all clients share the proxy's IP, so a password-guessing client
+can lock everyone out for up to a minute; that's the trade-off for not trusting forwarded headers.
+
+Every response carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and
+`X-Frame-Options: DENY`; the page has a strict Content-Security-Policy, and API responses are sent
+with `Cache-Control: no-store` so query logs aren't kept in browser or proxy caches.
 
 Secrets can come from environment variables instead of the file:
 

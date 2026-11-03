@@ -81,6 +81,9 @@ func main() {
 			log.Printf("instance %s: %s", in.Name, in.URL)
 		}
 		log.Printf("listening on %s", cfg.Listen)
+		if !cfg.Auth.Enabled && !loopbackOnly(cfg.Listen) {
+			log.Printf("WARNING: auth is disabled and %s is reachable from other hosts; anyone who can reach it can read the query log and turn blocking off. Enable auth or listen on 127.0.0.1.", cfg.Listen)
+		}
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal(err)
 		}
@@ -95,6 +98,20 @@ func main() {
 	if err := httpServer.Shutdown(ctx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+}
+
+// loopbackOnly reports whether the listen address only accepts local
+// connections (127.0.0.1, ::1 or localhost).
+func loopbackOnly(listen string) bool {
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // probe calls /healthz on the local listener. The distroless image has no

@@ -73,3 +73,20 @@ func TestBadMySQLTarget(t *testing.T) {
 		t.Fatalf("err = %v, want a query log target error", err)
 	}
 }
+
+func TestDBErrorsDoNotLeakConnectionDetails(t *testing.T) {
+	r := New(config.QueryLogConfig{Type: "postgresql", Target: "postgres://dbuser:supersecret@127.0.0.1:1/blocky?connect_timeout=1"})
+	defer r.Close()
+	_, err := r.Read(context.Background(), "", "", "", 10)
+	if err == nil {
+		t.Fatal("want an error from an unreachable database")
+	}
+	for _, leak := range []string{"supersecret", "dbuser", "127.0.0.1"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Errorf("error shown to the browser contains %q: %v", leak, err)
+		}
+	}
+	if !strings.Contains(err.Error(), "see the dashboard log") {
+		t.Errorf("want a pointer to the log, got %v", err)
+	}
+}

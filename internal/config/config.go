@@ -93,6 +93,11 @@ func IsDatabaseQueryLog(t string) bool {
 	return false
 }
 
+// BasicEnabled reports whether Basic Auth logins are accepted: only when both
+// a username and a password are configured. A username alone (the chart's
+// default "admin") never enables it, so empty credentials can't match.
+func (a AuthConfig) BasicEnabled() bool { return a.Username != "" && a.Password != "" }
+
 func Load(path string) (Config, error) {
 	cfg := Config{
 		Listen: "127.0.0.1:3001",
@@ -118,11 +123,14 @@ func Load(path string) (Config, error) {
 
 // Validate rejects configurations that would run with unsafe or unusable settings.
 func (c Config) Validate() error {
-	if c.Auth.Enabled && c.Auth.HeaderToken == "" {
-		if c.Auth.Username == "" || c.Auth.Password == "" {
-			return errors.New("auth is enabled but username or password is empty")
+	if a := c.Auth; a.Enabled {
+		if !a.BasicEnabled() && a.HeaderToken == "" {
+			return errors.New("auth is enabled but neither auth.password nor auth.headerToken is set")
 		}
-		if c.Auth.Password == "change-me" {
+		if a.Password != "" && a.Username == "" {
+			return errors.New("auth.password is set but auth.username is empty")
+		}
+		if a.Password == "change-me" {
 			return errors.New("auth is enabled with the example password; set auth.password")
 		}
 	}
@@ -131,7 +139,7 @@ func (c Config) Validate() error {
 	}
 	for _, in := range c.ResolvedInstances() {
 		if q := in.QueryLog; q.IsEnabled() && q.Type != "" && !KnownQueryLogType(q.Type) {
-			return fmt.Errorf("instance %q: unsupported queryLog.type %q (use csv, csv-client, mysql, postgresql or timescale)", in.Name, q.Type)
+			return fmt.Errorf("instance %q: unsupported queryLog.type %q (use csv, csv-client, mysql, postgresql, timescale or http)", in.Name, q.Type)
 		}
 	}
 	seen := map[string]string{}
