@@ -26,7 +26,11 @@ func New(cfg config.BlockyConfig) *Client {
 		baseURL: strings.TrimRight(cfg.URL, "/"),
 		token:   cfg.Token,
 		headers: cfg.Headers,
-		http:    &http.Client{Timeout: 10 * time.Second},
+		// No redirects: they could carry the bearer token and custom headers
+		// somewhere other than the configured Blocky.
+		http: &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+			return fmt.Errorf("blocky redirected to %s; set the instance url to the final address", req.URL.Redacted())
+		}},
 	}
 }
 

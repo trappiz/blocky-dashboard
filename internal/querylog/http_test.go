@@ -2,6 +2,7 @@ package querylog
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -132,5 +133,42 @@ func TestHTTPSourceSendsToken(t *testing.T) {
 	_, err = New(config.QueryLogConfig{Type: "http", Target: srv.URL, Token: "wrong"}).Read(context.Background(), "", "", "", 10)
 	if err == nil || !strings.Contains(err.Error(), "token rejected") || strings.Contains(err.Error(), "wrong") {
 		t.Fatalf("want a rejected-token error without the token in it, got %v", err)
+	}
+}
+
+func TestHTTPSourceRefusesRedirects(t *testing.T) {
+	var leaked atomic.Value
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked.Store(r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(sample))
+	}))
+	t.Cleanup(other.Close)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL, http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := New(config.QueryLogConfig{Type: "http", Target: srv.URL, Token: "s3cret"}).Read(context.Background(), "", "", "", 10)
+	if err == nil || !strings.Contains(err.Error(), "redirected") {
+		t.Fatalf("want a redirect error, got %v", err)
+	}
+	if v := leaked.Load(); v != nil {
+		t.Fatalf("redirect target was contacted (Authorization %q)", v)
+	}
+}
+
+func TestHTTPSourceCacheIsBounded(t *testing.T) {
+	url, _, _ := newLogServer(t, http.StatusOK, sample)
+	r := New(config.QueryLogConfig{Type: "http", Target: url})
+	for i := 0; i < httpCacheMax*3; i++ {
+		if _, err := r.Read(context.Background(), fmt.Sprintf("q%d", i), "", "", 10); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.http.mu.Lock()
+	n := len(r.http.cached)
+	r.http.mu.Unlock()
+	if n > httpCacheMax {
+		t.Fatalf("cache holds %d entries, max %d", n, httpCacheMax)
 	}
 }

@@ -74,12 +74,19 @@ func (l *loginLimiter) succeed(ip string) {
 	l.mu.Unlock()
 }
 
+// clientIP is the rate-limit key: the IPv4 address, or the /64 network for
+// IPv6, since one client usually controls a whole /64 and could otherwise
+// rotate addresses to get fresh attempts.
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
 	}
-	return host
+	ip := net.ParseIP(host)
+	if ip == nil || ip.To4() != nil {
+		return host
+	}
+	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }
 
 func tooManyAttempts(w http.ResponseWriter, wait time.Duration) {

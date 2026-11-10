@@ -41,6 +41,15 @@ type cachedResponse struct {
 	entries []Entry
 }
 
+// httpCacheMax bounds the cache: each entry can hold a large response.
+const httpCacheMax = 32
+
+// noRedirects stops the client following redirects, which could carry the
+// bearer token somewhere other than the configured server.
+func noRedirects(req *http.Request, via []*http.Request) error {
+	return fmt.Errorf("query log server redirected to %s; set queryLog.target to the final URL", req.URL.Redacted())
+}
+
 // httpCacheTTL coalesces the UI's refresh and search-as-you-type requests so
 // the log server is not asked for the same data several times a second.
 const httpCacheTTL = 5 * time.Second
@@ -53,7 +62,7 @@ func newHTTPSource(target, token string) (*httpSource, error) {
 	return &httpSource{
 		url:    target,
 		token:  token,
-		client: &http.Client{Timeout: 10 * time.Second},
+		client: &http.Client{Timeout: 10 * time.Second, CheckRedirect: noRedirects},
 		cached: map[string]cachedResponse{},
 	}, nil
 }
@@ -169,6 +178,15 @@ func (s *httpSource) fetch(ctx context.Context, reqURL string) ([]Entry, error) 
 		if time.Since(c.at) >= httpCacheTTL {
 			delete(s.cached, k)
 		}
+	}
+	for len(s.cached) >= httpCacheMax { // still full: drop the oldest
+		oldest := ""
+		for k, c := range s.cached {
+			if oldest == "" || c.at.Before(s.cached[oldest].at) {
+				oldest = k
+			}
+		}
+		delete(s.cached, oldest)
 	}
 	s.cached[reqURL] = cachedResponse{at: time.Now(), entries: entries}
 	s.mu.Unlock()

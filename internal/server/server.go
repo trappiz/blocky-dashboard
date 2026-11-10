@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
@@ -116,8 +117,7 @@ func (s *Server) auth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		}
 		if s.cfg.Auth.HeaderToken != "" {
-			got := r.Header.Get("X-Blocky-Dashboard-Token")
-			if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.Auth.HeaderToken)) == 1 {
+			if secretEqual(r.Header.Get("X-Blocky-Dashboard-Token"), s.cfg.Auth.HeaderToken) {
 				allow()
 				return
 			}
@@ -127,8 +127,7 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		if s.cfg.Auth.BasicEnabled() {
 			u, p, ok := r.BasicAuth()
 			if ok && u != "" && p != "" &&
-				subtle.ConstantTimeCompare([]byte(u), []byte(s.cfg.Auth.Username)) == 1 &&
-				subtle.ConstantTimeCompare([]byte(p), []byte(s.cfg.Auth.Password)) == 1 {
+				secretEqual(u, s.cfg.Auth.Username) && secretEqual(p, s.cfg.Auth.Password) {
 				allow()
 				return
 			}
@@ -143,6 +142,14 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		}
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 	})
+}
+
+// secretEqual compares in constant time without revealing the length of the
+// secret: subtle.ConstantTimeCompare returns early when lengths differ, so
+// both sides are hashed to equal-length digests first.
+func secretEqual(got, want string) bool {
+	g, w := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(want))
+	return subtle.ConstantTimeCompare(g[:], w[:]) == 1
 }
 
 // sameOrigin rejects state-changing requests sent from other sites. Browsers

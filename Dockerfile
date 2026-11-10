@@ -6,7 +6,7 @@
 # ---- build ----
 # Runs on the build host's architecture and cross-compiles for the target,
 # so multi-arch images build without QEMU emulation.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine@sha256:1ae0735f00daffa3aaf1363a5184c0d2dc55c78e3db4ec70241cdac97bf84b59 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:fa3d596898d9f126af7c01d14ee7597bab3f39cccf392ef36b69fe77cd681f18 AS build
 WORKDIR /src
 
 COPY go.mod go.sum ./

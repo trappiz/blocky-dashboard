@@ -251,8 +251,18 @@ function select(id) {
   if (selected().queryLogs) loadLogs();
 }
 
+// hashInstance reads the instance id from the URL hash. A malformed hash
+// (e.g. "#%") yields "" instead of throwing, which would stop the page loading.
+function hashInstance() {
+  try {
+    return decodeURIComponent(location.hash.slice(1));
+  } catch {
+    return '';
+  }
+}
+
 function initialSelection() {
-  const fromHash = decodeURIComponent(location.hash.slice(1));
+  const fromHash = hashInstance();
   let stored = '';
   try { stored = localStorage.getItem('instance') || ''; } catch {}
   return [fromHash, stored].find(id => state.instances.some(i => i.id === id)) || state.instances[0].id;
@@ -532,7 +542,7 @@ function wire() {
   $('logForm').addEventListener('submit', e => { e.preventDefault(); loadLogs(); });
   $('logClear').addEventListener('click', () => { $('logForm').reset(); loadLogs(); });
 
-  window.addEventListener('hashchange', () => select(decodeURIComponent(location.hash.slice(1))));
+  window.addEventListener('hashchange', () => select(hashInstance()));
   document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
   let lastWidth = 0;
   new ResizeObserver(entries => {

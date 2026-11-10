@@ -209,7 +209,7 @@ without stripping it.
 
 ## Build
 
-Requires Go 1.25+.
+Requires Go 1.25 or newer. Release builds and images use the latest Go 1.27 patch, since Go only ships security fixes for its two newest releases.
 
 ```bash
 make build

@@ -323,3 +323,27 @@ func TestFailedLoginsAreRateLimited(t *testing.T) {
 		t.Fatalf("a single failure after success should not lock out: got %d", rec.Code)
 	}
 }
+
+func TestSecretEqual(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{{"tok", "tok", true}, {"tok", "toK", false}, {"tok", "tokk", false}, {"", "", true}, {"", "x", false}} {
+		if got := secretEqual(c.a, c.b); got != c.want {
+			t.Errorf("secretEqual(%q, %q) = %v", c.a, c.b, got)
+		}
+	}
+}
+
+func TestClientIPGroupsIPv6By64(t *testing.T) {
+	key := func(addr string) string { return clientIP(&http.Request{RemoteAddr: addr}) }
+	if a, b := key("[2001:db8:1:2::1]:5000"), key("[2001:db8:1:2:ffff::9]:6000"); a != b || a != "2001:db8:1:2::/64" {
+		t.Errorf("same /64 should share a key: %q vs %q", a, b)
+	}
+	if a, b := key("[2001:db8:1:2::1]:5000"), key("[2001:db8:1:3::1]:5000"); a == b {
+		t.Errorf("different /64s should not share a key: %q", a)
+	}
+	if got := key("10.1.1.5:1234"); got != "10.1.1.5" {
+		t.Errorf("IPv4 key = %q", got)
+	}
+}
